@@ -7,7 +7,8 @@
 
     <Grid>
         <!-- the shared Goat Stream UI (web/) -->
-        <controls:WebView2 x:Name="Web" DefaultBackgroundColor="Black" />
+        <!-- (its black loading background comes from WEBVIEW2_DEFAULT_BACKGROUND_COLOR in App.xaml.cs) -->
+        <controls:WebView2 x:Name="Web" />
 
         <!-- native 4K / HDR player, shown on top while a movie plays -->
         <Grid x:Name="PlayerLayer" Visibility="Collapsed" Background="Black">
