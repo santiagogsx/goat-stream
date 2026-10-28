@@ -345,8 +345,9 @@ function emptyHTML() {
       <button class="btn btn-dark focusable" data-act="page" data-page="settings">Connect Google Drive, OneDrive or Dropbox</button></div></div>`;
   }
   return `<div class="empty" style="padding-top:8rem"><h2>No movies yet</h2>
-    <p>${S.online ? 'Open Goat Stream on your PC and add a movie folder or connect Google Drive, OneDrive or Dropbox. They\'ll show up here automatically.' : 'Your PC is offline. Turn on your PC (Goat Stream runs in the system tray) and try again.'}</p>
-    <div class="btns"><button class="btn btn-play focusable" data-act="refresh">Refresh</button></div></div>`;
+    <p>${S.online ? 'Add Google Drive, OneDrive or Dropbox right here with your phone, or add movie folders in Goat Stream on your PC. Everything shows up here automatically.' :'Your PC is offline. Turn on your PC (Goat Stream runs in the system tray) and try again.'}</p>
+    <div class="btns"><button class="btn btn-play focusable" data-act="refresh">Refresh</button>
+    ${S.online ? `<button class="btn btn-dark focusable" data-act="addCloud">☁️ Add cloud drive</button>` : ''}</div></div>`;
 }
 
 function renderHome() {
@@ -1082,19 +1083,18 @@ async function renderSettings() {
 }
 
 function remoteSettingsHTML() {
-  const accs = store.get('accounts', []);
+  const accs = TV ? store.get('accounts', []) : (S.cloudAccounts || []);
   return `<div class="sec"><h2>🖥️ Your PC</h2>
       <div class="li"><div class="provider pc">PC</div><div class="grow"><b>${esc(S.serverName || 'Goat Stream PC')}</b>
         <small>${S.online ? '<span class="ok">Connected</span>' : '<span class="warn">Offline</span>'} ${TV ? '· ' + esc(conn.base) : ''}</small></div></div>
       <div class="btns" style="margin-top:1rem"><button class="btn btn-play btn-small focusable" data-act="refresh">Refresh library</button>
       <button class="btn btn-dark btn-small focusable" data-act="unlink">Unlink this ${TV ? 'TV' : 'device'}</button></div></div>
-    ${TV ? `<div class="sec"><h2>☁️ Cloud drives</h2>
-      <p>Connected on your PC and shared with this TV. Cloud movies stream straight from the cloud, even when your PC is off.</p>
-      ${accs.map(a => `<div class="li">${providerIcon(a.provider)}<div class="grow"><b>${SOURCE_NAMES[a.provider]}</b><small>${esc(a.name)}</small></div></div>`).join('') || '<p>None yet.</p>'}
-      ${S.online ? `<div class="btns" style="margin-top:1rem">
-        ${CLOUDS.map(c => `<button class="btn btn-play btn-small focusable" data-act="phoneSignIn" data-provider="${SIGNIN[c]}">📱 Connect ${SOURCE_NAMES[c]}</button>`).join('')}</div>
-        <p style="color:#999;font-size:.85rem">Shows a QR code — scan it with your phone and sign in there.</p>` : ''}
-      ${accs.length ? '<div class="btns" style="margin-top:1rem"><button class="btn btn-dark btn-small focusable" data-act="tvCloudScan">Rescan cloud from this TV</button></div>' : ''}</div>` : ''}
+    <div class="sec"><h2>☁️ Cloud drives</h2>
+      <p>Add Google Drive, OneDrive or Dropbox right here: scan a QR code with your phone and sign in there.
+      ${TV ? 'Cloud movies then stream straight from the cloud — even when your PC is off.' : ''}</p>
+      ${accs.map(a => `<div class="li">${providerIcon(a.provider)}<div class="grow"><b>${SOURCE_NAMES[a.provider]}</b><small>${esc(a.name)}</small></div></div>`).join('') || '<p>None connected yet.</p>'}
+      <div class="btns" style="margin-top:1rem"><button class="btn btn-play btn-small focusable" data-act="addCloud">${I.plus} Add cloud drive</button>
+      ${TV && accs.length ? '<button class="btn btn-dark btn-small focusable" data-act="tvCloudScan">Rescan cloud from this TV</button>' : ''}</div></div>
     ${appsToggleHTML()}
     ${introToggleHTML()}
     ${updatesHTML()}
@@ -1157,6 +1157,7 @@ const settingsActions = {
   unlink: () => { if (confirm('Unlink from your PC? You can link again any time.')) unlink(false); },
   tvCloudScan: () => tvCloudScan(),
   phoneSignIn: el => openPhoneSignIn(el.dataset.provider),
+  addCloud: () => openCloudPicker(),
   checkUpdates: async () => {
     if (TV) return tvCheckUpdate(true);
     const s = await window.goatDesktop.checkForUpdates();
@@ -1168,6 +1169,35 @@ const settingsActions = {
   setIntro: el => { store.set('introAlways', el.dataset.v === '1'); renderSettings(); },
   replayIntro: () => { store.set('introSeen', false); playIntro(); },
 };
+
+// TV / browser: pick which cloud drive to add (big tiles), then sign in by phone
+const CLOUD_TILE = {
+  gdrive: { bg: '#fff', fg: '#1a73e8' }, onedrive: { bg: '#0078d4', fg: '#fff' }, dropbox: { bg: '#0061fe', fg: '#fff' },
+};
+async function openCloudPicker() {
+  if (!S.online) { toast('Turn on Goat Stream on your PC first — it handles the sign-in.'); return; }
+  let info;
+  try { info = await api('/api/cloud/providers'); } catch (e) { toast(e.message); return; }
+  S.cloudAccounts = info.accounts;
+  const ov = openOverlay(`<div class="dialog" style="width:min(48rem,100%)">
+    <h2>Add a cloud drive</h2>
+    <p>Pick one — a QR code appears, scan it with your phone and sign in there.</p>
+    <div class="cloud-tiles">${CLOUDS.map(c => {
+      const ready = info.phoneSignIn && info.providers[SIGNIN[c]];
+      const n = info.accounts.filter(a => a.provider === c).length;
+      return `<button class="cloud-tile focusable" ${ready ? '' : 'disabled'} data-provider="${SIGNIN[c]}" style="--bg:${CLOUD_TILE[c].bg};--fg:${CLOUD_TILE[c].fg}">
+        <span class="ct-logo">${PROVIDER_BADGE[c][1]}</span><b>${SOURCE_NAMES[c]}</b>
+        <small>${ready ? (n ? `${n} connected · add another` : 'Scan with your phone') : 'Needs a one-time setup on your PC'}</small></button>`;
+    }).join('')}</div>
+    ${CLOUDS.some(c => !(info.phoneSignIn && info.providers[SIGNIN[c]])) ? `<p style="color:#999;font-size:.85rem;margin-top:1rem">Greyed out? On your PC open Goat Stream → Settings → Cloud drives → App keys (see the README).</p>` : ''}
+    <div class="btns"><button class="btn btn-dark focusable" data-act="closeOverlay">Close</button></div></div>`);
+  ov.addEventListener('click', e => {
+    const b = e.target.closest('.cloud-tile');
+    if (!b || b.disabled) return;
+    closeOverlay(ov);
+    openPhoneSignIn(b.dataset.provider);
+  });
+}
 
 // Sign in to a cloud drive by scanning a QR code with your phone
 async function openPhoneSignIn(provider) {

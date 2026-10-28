@@ -251,6 +251,15 @@ html.tv .app-tile:focus { transform: scale(1.08); box-shadow: 0 0 0 3px var(--go
 .dialog .btns { justify-content: center; margin-top: 1.4rem; }
 .dialog .big-icon { font-size: 3rem; }
 
+.cloud-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 1.2rem; }
+.cloud-tile { display: grid; justify-items: center; gap: .45rem; padding: 1.4rem .8rem; border-radius: 12px; background: #1f1f1f; border: 2px solid #333; transition: transform .15s, border-color .15s; }
+.cloud-tile:hover:not(:disabled), .cloud-tile:focus { border-color: var(--gold); transform: scale(1.04); outline: none; }
+.cloud-tile:disabled { opacity: .45; cursor: not-allowed; }
+.cloud-tile .ct-logo { width: 3.6rem; height: 3.6rem; border-radius: 14px; display: grid; place-items: center; font-size: 1.8rem; font-weight: 900; background: var(--bg); color: var(--fg); }
+.cloud-tile b { font-size: 1.1rem; }
+.cloud-tile small { color: #aaa; font-size: .8rem; }
+@media (max-width: 760px) { .cloud-tiles { grid-template-columns: 1fr; } }
+
 /* ---------- onboarding (TV / browser pairing) ---------- */
 .onboard { position: fixed; inset: 0; z-index: 60; background: radial-gradient(circle at 50% 0%, #2a1e06 0%, #050505 60%); display: grid; place-items: center; overflow-y: auto; padding: 2rem; }
 .onboard-inner { width: min(44rem, 100%); text-align: center; }

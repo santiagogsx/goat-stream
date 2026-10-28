@@ -16,8 +16,9 @@ const { Readable } = require('stream');
 const { EventEmitter } = require('events');
 const { execFile, spawn } = require('child_process');
 
-const PORT = 8787;
-const DISCOVERY_PORT = 8788;
+// GOAT_PORT lets a test copy run next to the installed app
+const PORT = +process.env.GOAT_PORT || 8787;
+const DISCOVERY_PORT = +process.env.GOAT_DISCOVERY_PORT || 8788;
 const VIDEO_TYPES = {
   '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mkv': 'video/x-matroska', '.webm': 'video/webm', '.mov': 'video/quicktime',
   '.avi': 'video/x-msvideo', '.ts': 'video/mp2t', '.m2ts': 'video/mp2t', '.wmv': 'video/x-ms-wmv',
@@ -709,6 +710,14 @@ function start({ dataDir, webDir, appKeys, version }) {
       return sendJson(res, 200, { accounts: db.accounts.map(a => ({ id: a.id, provider: a.provider, name: a.name, clientId: a.clientId, clientSecret: a.clientSecret, refreshToken: a.refreshToken, root: a.root })) });
     }
 
+    // which cloud drives a TV can connect right now (app keys set on the PC + hand-off page available)
+    if (p === '/api/cloud/providers') {
+      return sendJson(res, 200, {
+        phoneSignIn: !!relayUrl(),
+        providers: Object.fromEntries(Object.keys(PROVIDER_NAMES).map(pr => [pr, hasKeys(pr)])),
+        accounts: db.accounts.map(a => ({ id: a.id, provider: a.provider, name: a.name })),
+      });
+    }
     // QR-code sign-in: the PC or a linked TV asks for a one-time link, a phone opens it
     if (p === '/api/oauth/phone' && req.method === 'POST') {
       const b = await readJson(req);
