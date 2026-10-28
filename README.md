@@ -1,7 +1,13 @@
 # 🐐 Goat Stream
 *Created by Santiago*
 
-Your own Netflix-style movie app. Movies on your **PC**, **Google Drive** and **Dropbox** — on your **Windows PC**, your **Android TV**, and **any other TV or phone with a web browser**.
+**Goat Stream is a personal media server and streaming platform** — your own Netflix for the movies and shows you already have.
+
+- 🖥️ **Media server** — your Windows PC becomes the server and streams your **local** movie folders in up to 4K/HDR.
+- ☁️ **Cloud movie streaming** — play straight from **Google Drive**, **OneDrive** and **Dropbox**, no downloading first.
+- 🍿 **Watch parties** — **Watch Together** lets friends watch the same movie at the same time, in sync.
+- 📺 **Every screen** — Windows, **Xbox**, **Android TV / Fire TV**, Samsung, LG, Roku, and any TV or phone with a web browser.
+- 🔒 Private — no accounts, no ads; your library stays on your home network.
 
 ```
 goat-stream/
