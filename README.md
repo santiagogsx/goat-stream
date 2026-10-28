@@ -45,6 +45,25 @@ npm run dist
 
 ---
 
+## ☁️ Cloud sign-in for everyone (how it works)
+
+For people using Goat Stream it's just: **TV → ☁️ Add cloud drive → pick Google Drive / OneDrive / Dropbox → scan the QR code → sign in on the phone → done.** No PC, no keys. The TV can even be used **without any PC** ("Use without a PC" on first start) — movies stream straight from the cloud.
+
+How: the phone signs in on the provider's own page, the hand-off page (`relay/oauth.html`) passes the one-time code to that exact TV over an encrypted peer-to-peer link, and the TV finishes signing in (PKCE — the code is useless to anyone else). Passwords are only ever typed on the provider's page on the phone.
+
+### One-time setup — app creator only (Santiago), never users
+Google, Microsoft and Dropbox only allow sign-ins through a registered app. Register Goat Stream once (sections below), then:
+1. **Sign-in helper (needed for Google only):** Google requires a private secret that must never be inside a downloadable app. Deploy `cloud-helper/` as a free Cloudflare Worker (`npx wrangler login`, then `npx wrangler deploy` in that folder) and add `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ONEDRIVE_CLIENT_ID`, `DROPBOX_APP_KEY` in its settings. It stores nothing.
+2. **Build the public IDs into every app:** GitHub → repository **Settings → Secrets → Actions** → secret `GOAT_CONFIG_JSON`:
+   ```json
+   { "google": { "clientId": "…apps.googleusercontent.com" }, "onedrive": { "clientId": "…" }, "dropbox": { "appKey": "…" },
+     "tokenHelper": "https://goat-stream-signin.<you>.workers.dev" }
+   ```
+   Only these public IDs go into downloads — secrets never do.
+3. Publish a new release. Every TV/PC copy now signs in by itself.
+
+> **Google's rules:** while Goat Stream's Google app is in "Testing", only up to 100 Google accounts you list as test users can sign in, and Google asks them to sign in again every 7 days. Lifting that requires Google's app verification (Drive access is a "restricted" permission and needs a paid security review). OneDrive and Dropbox have no such limits.
+
 ## 2. Connect Google Drive & Dropbox (one-time setup, ~10 minutes)
 
 Google and Dropbox only let an app read your files if the app has its own keys. You make them once, paste them into **Settings → Cloud drives → App keys**, then **Connect** is one click forever after. (Or put them in `desktop/config.json` so they're built in.)

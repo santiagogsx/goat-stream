@@ -15,6 +15,7 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
@@ -68,6 +69,8 @@ class MainActivity : ComponentActivity() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
                 loader.shouldInterceptRequest(request.url)
         }
+        // without this, any browser pop-up (confirm/alert) is silently answered "no"
+        web.webChromeClient = WebChromeClient()
         web.addJavascriptInterface(Bridge(), "GoatTV")
         web.isFocusable = true
         web.isFocusableInTouchMode = true

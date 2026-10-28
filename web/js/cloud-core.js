@@ -91,11 +91,18 @@
     // account: {id, provider, clientId, clientSecret, refreshToken, accessToken, expiresAt, root}
     async function accessToken(acc) {
       if (acc.accessToken && acc.expiresAt > Date.now() + 5 * 60 * 1000) return acc.accessToken;
-      const url = TOKEN_URLS[acc.provider];
-      const d = await json('POST', url, { 'Content-Type': 'application/x-www-form-urlencoded' }, form({
-        grant_type: 'refresh_token', refresh_token: acc.refreshToken, client_id: acc.clientId, client_secret: acc.clientSecret,
-        scope: acc.provider === 'onedrive' ? ONEDRIVE_SCOPE : null,
-      }));
+      let d;
+      if (acc.helper) {
+        // signed in through Goat Stream's sign-in helper (it holds Google's secret; apps never do)
+        d = await json('POST', acc.helper.replace(/\/+$/, '') + '/token', { 'Content-Type': 'application/json' }, JSON.stringify({
+          provider: acc.provider === 'gdrive' ? 'google' : acc.provider, grant_type: 'refresh_token', refresh_token: acc.refreshToken,
+        }));
+      } else {
+        d = await json('POST', TOKEN_URLS[acc.provider], { 'Content-Type': 'application/x-www-form-urlencoded' }, form({
+          grant_type: 'refresh_token', refresh_token: acc.refreshToken, client_id: acc.clientId, client_secret: acc.clientSecret,
+          scope: acc.provider === 'onedrive' ? ONEDRIVE_SCOPE : null,
+        }));
+      }
       acc.accessToken = d.access_token;
       acc.expiresAt = Date.now() + (d.expires_in || 3600) * 1000;
       if (d.refresh_token) acc.refreshToken = d.refresh_token;      // Microsoft hands out a fresh one each time
@@ -209,5 +216,5 @@
     return { accessToken, list, playInfo };
   }
 
-  return { create, parseName, isVideoName, VIDEO_EXT, ONEDRIVE_SCOPE };
+  return { create, parseName, isVideoName, VIDEO_EXT, ONEDRIVE_SCOPE, TOKEN_URLS };
 });

@@ -131,7 +131,7 @@ const conn = {
   base: APP_TV ? store.get('server', '') : '',
   token: MODE === 'desktop' || (MODE === 'browser' && IS_LOCALHOST) ? '' : store.get('token', ''),
 };
-function needsPairing() { return APP_TV ? !(conn.base && conn.token) : (MODE === 'browser' && !IS_LOCALHOST && !conn.token); }
+function needsPairing() { return APP_TV ? !(conn.base && conn.token) && !store.get('standalone', false) : (MODE === 'browser' && !IS_LOCALHOST && !conn.token); }
 
 async function api(path, method, data) {
   const headers = { 'Content-Type': 'application/json' };
@@ -161,13 +161,29 @@ const S = {
   showApps: store.get('showApps', true),   // Netflix/Hulu/etc. launcher row — can be switched off in Settings
 };
 
+// Movies from cloud drives signed in on this TV itself (no PC involved) live next to the PC's library
+const tvOnlyItems = () => store.get('tvItems', []);
+function withTvItems(items) {
+  const ids = new Set(items.map(i => i.id));
+  return items.concat(tvOnlyItems().filter(i => !ids.has(i.id)));
+}
+
 async function loadLibrary(quiet) {
+  // TV used on its own (cloud drives only, no PC linked)
+  if (APP_TV && !conn.base) {
+    S.online = false;
+    S.items = withTvItems([]);
+    buildTitles();
+    render();
+    if (store.get('accounts', []).some(a => a.tvOnly) && Date.now() - store.get('tvScanAt', 0) > 6 * 3600e3) scanTvAccounts(true);
+    return;
+  }
   try {
     const lib = await api('/api/library');
     S.online = true;
     S.serverName = lib.serverName;
     S.scanning = lib.scanning;
-    S.items = lib.items;
+    S.items = APP_TV ? withTvItems(lib.items) : lib.items;
     S.showApps = lib.showApps !== false;
     store.set('showApps', S.showApps);
     if (TV) {
@@ -178,7 +194,7 @@ async function loadLibrary(quiet) {
   } catch (e) {
     if (e.status === 401 && MODE !== 'desktop') { unlink(true); return; }
     S.online = false;
-    if (TV) S.items = store.get('lib', []);
+    if (APP_TV) S.items = withTvItems(store.get('lib', []));
     if (!quiet) toast(TV ? 'Your PC is offline — showing your saved library. Cloud movies still play.' : 'Can\'t reach the Goat Stream server.');
   }
   buildTitles();
@@ -191,6 +207,8 @@ function mergeAccounts(remote) {
     const l = local.find(x => x.id === r.id && x.refreshToken === r.refreshToken);
     return l ? Object.assign({}, r, { accessToken: l.accessToken, expiresAt: l.expiresAt }) : r;
   });
+  // keep the drives signed in on this TV itself
+  for (const l of local) if (l.tvOnly && !merged.some(r => r.id === l.id)) merged.push(l);
   store.set('accounts', merged);
 }
 
@@ -363,10 +381,18 @@ function emptyHTML() {
       <div class="btns"><button class="btn btn-play focusable" data-act="addFolder">${I.plus} Add a movie folder</button>
       <button class="btn btn-dark focusable" data-act="page" data-page="settings">Connect Google Drive, OneDrive or Dropbox</button></div></div>`;
   }
+  const canCloud = S.online || anyDirect();
+  // TV on its own: straight to "add a cloud drive"
+  if (APP_TV && !conn.base) {
+    return `<div class="empty" style="padding-top:8rem"><h2>Let's add your movies</h2>
+      <p>Connect Google Drive, OneDrive or Dropbox — scan a QR code with your phone, sign in, done.</p>
+      <div class="btns"><button class="btn btn-play focusable" data-act="addCloud">☁️ Add cloud drive</button>
+      <button class="btn btn-dark focusable" data-act="linkPc">Link a PC instead</button></div></div>`;
+  }
   return `<div class="empty" style="padding-top:8rem"><h2>No movies yet</h2>
-    <p>${S.online ? 'Add Google Drive, OneDrive or Dropbox right here with your phone, or add movie folders in Goat Stream on your PC. Everything shows up here automatically.' :'Your PC is offline. Turn on your PC (Goat Stream runs in the system tray) and try again.'}</p>
+    <p>${S.online ? 'Add Google Drive, OneDrive or Dropbox right here with your phone, or add movie folders in Goat Stream on your PC. Everything shows up here automatically.' : 'Your PC is offline. Turn on your PC (Goat Stream runs in the system tray) and try again.'}</p>
     <div class="btns"><button class="btn btn-play focusable" data-act="refresh">Refresh</button>
-    ${S.online ? `<button class="btn btn-dark focusable" data-act="addCloud">☁️ Add cloud drive</button>` : ''}</div></div>`;
+    ${canCloud ? `<button class="btn btn-dark focusable" data-act="addCloud">☁️ Add cloud drive</button>` : ''}</div></div>`;
 }
 
 function renderHome() {
@@ -509,6 +535,25 @@ function closeOverlay(ov) {
   return true;
 }
 
+// "Are you sure?" inside the app. window.confirm() is silently answered "no" by the Android TV / Fire TV app
+// (and blocked on some TV browsers), so every confirmation goes through here instead.
+function askConfirm(title, text, yesLabel) {
+  return new Promise(resolve => {
+    let answer = false;
+    const ov = openOverlay(`<div class="dialog"><h2>${esc(title)}</h2>${text ? `<p>${esc(text)}</p>` : ''}
+      <div class="btns"><button class="btn btn-play focusable" data-confirm="yes">${esc(yesLabel || 'Yes')}</button>
+      <button class="btn btn-dark focusable" data-autofocus data-confirm="no">Cancel</button></div></div>`,
+    { onClose: () => resolve(answer) });
+    ov.addEventListener('click', e => {
+      const b = e.target.closest('[data-confirm]');
+      if (!b) return;
+      e.stopPropagation();
+      answer = b.dataset.confirm === 'yes';
+      closeOverlay(ov);
+    });
+  });
+}
+
 // Back button (TV remote, Esc, browser back)
 window.goatBack = () => {
   if (Player.active) { Player.close(); return true; }
@@ -584,7 +629,7 @@ function openTitle(key, season) {
   return ov;
 }
 
-const canAdmin = () => MODE === 'desktop' || IS_LOCALHOST;
+const canAdmin = () => MODE === 'desktop' || (MODE === 'browser' && IS_LOCALHOST);
 
 // "Fix match": search the movie database and pin the right cover + details to a title
 function openFixMatch(key) {
@@ -658,6 +703,21 @@ async function play(it, fromStart) {
   }
   if (DESKTOP && S.settings && S.settings.player === 'external') { playExternal(it); return; }
   if (TV) return playTV(it, start, 'direct');
+  // Samsung / LG: a cloud movie the PC can't hand over (no PC, or a drive signed in on this TV) streams from the cloud
+  if (TVWEB && it.cloud) {
+    const acc = store.get('accounts', []).find(a => a.id === it.cloud.accountId);
+    if (acc && (!S.online || acc.tvOnly)) {
+      try {
+        const accs = store.get('accounts', []);
+        const info = await cloud.playInfo(accs.find(a => a.id === acc.id), it);
+        store.set('accounts', accs);
+        // the TV's video player can't send sign-in headers, so Google's token rides in the address
+        const url = info.headers && info.headers.Authorization ? info.url + '&access_token=' + encodeURIComponent(info.headers.Authorization.replace(/^Bearer /, '')) : info.url;
+        Player.open(it, start, 'direct', url);
+      } catch (e) { toast(e.message || 'Couldn\'t start this movie'); }
+      return;
+    }
+  }
   Player.open(it, start);
 }
 
@@ -714,6 +774,19 @@ window.goatPlayerClosed = json => {
   render();
 };
 
+// What this device needs when the PC converts a movie for it:
+//  - iPhone / iPad / Safari only play converted video as HLS (Apple's streaming format)
+//  - phones: 1080p (many reject 4K H.264) and stereo sound (5.1 AAC is refused by some)
+function convertWants(video) {
+  const out = {};
+  if (MODE === 'browser' && video.canPlayType('application/vnd.apple.mpegurl')) out.hls = 1;
+  if (MODE === 'browser' && matchMedia('(pointer: coarse)').matches) {
+    out.maxh = Math.min(2160, Math.max(720, Math.round(Math.min(screen.width, screen.height) * (window.devicePixelRatio || 1) / 360) * 360));
+    out.stereo = 1;
+  }
+  return out;
+}
+
 // PC window + TV browsers: HTML5 player with automatic format fallback (direct -> remux -> full convert)
 const Player = {
   active: null,
@@ -726,8 +799,13 @@ const Player = {
     const mse = t => { try { return !!(window.MediaSource && MediaSource.isTypeSupported(t)); } catch (e) { return false; } };
     const v = document.createElement('video');
     const can = t => mse(t) || v.canPlayType(t) === 'probably';
+    // phones / Safari only decode H.264 in the common 8-bit 4:2:0 colour format; ask the device about the rarer
+    // "Hi" profiles (4:4:4, 4:2:2, 10-bit) instead of assuming — the PC app's own player handles them fine
+    const pix = pr.pix || '';
+    const h264ok = !pix || /^(yuvj?420p|nv12)$/.test(pix)
+      || (/444/.test(pix) ? can('video/mp4; codecs="avc1.F40028"') : /422/.test(pix) ? can('video/mp4; codecs="avc1.7A0028"') : can('video/mp4; codecs="avc1.6E0028"'));
     const vOk = ({
-      h264: true, vp8: true, vp9: can('video/webm; codecs="vp9"'),
+      h264: h264ok, vp8: true, vp9: can('video/webm; codecs="vp9"'),
       av1: can('video/mp4; codecs="av01.0.08M.08"'), hevc: can('video/mp4; codecs="hvc1.1.6.L153.B0"'),
     })[pr.vcodec];
     const aOk = !pr.acodec || ['aac', 'mp3', 'opus', 'vorbis', 'flac'].includes(pr.acodec);
@@ -737,7 +815,7 @@ const Player = {
     if (vOk) return 'remux';
     return 'transcode';
   },
-  open(it, startSec, forcedMode) {
+  open(it, startSec, forcedMode, directUrl) {
     if (this.active) this.close(true);
     const t = titleOfItem(it);
     const el = document.createElement('div');
@@ -769,7 +847,22 @@ const Player = {
       it, el, video, mode: forcedMode || this.pickMode(it), offset: 0,
       duration: it.duration || (it.probe && it.probe.duration) || 0, lastSave: 0, idleTimer: null,
     };
-    video.volume = +store.get('vol', 1);
+    // Volume: normally the <video>'s own volume. While Watch Together shares the sound, the movie runs through a
+    // Web Audio mix and the host's volume becomes a gain on their speakers only (friends keep full volume).
+    P.vol = Math.min(1, Math.max(0, +store.get('vol', 1)));
+    P.muted = false;
+    P.hostGain = null;
+    P.applyVolume = () => {
+      if (P.hostGain) { video.volume = 1; video.muted = false; P.hostGain.gain.value = P.muted ? 0 : P.vol; }
+      else { video.volume = P.vol; video.muted = P.muted; }
+      const b = el.querySelector('[data-pl="mute"]');
+      if (b) b.innerHTML = P.muted ? I.mute : I.vol;
+      const s = el.querySelector('.pl-vol');
+      if (s && +s.value !== P.vol) s.value = P.vol;
+    };
+    P.setVolume = v => { P.vol = Math.min(1, Math.max(0, Math.round(v * 100) / 100)); P.muted = false; store.set('vol', P.vol); P.applyVolume(); };
+    P.toggleMute = () => { P.muted = !P.muted; P.applyVolume(); };
+    P.applyVolume();
     if (DESKTOP) window.goatDesktop.setPlaying(true);
 
     const curTime = () => P.offset + (video.currentTime || 0);
@@ -779,13 +872,13 @@ const Player = {
       el.querySelector('.pl-center').innerHTML = '<div class="spinner"></div>';
       if (P.mode === 'direct') {
         P.offset = 0;
-        const src = srvUrl('/stream/' + encodeURIComponent(it.id));
+        const src = directUrl || srvUrl('/stream/' + encodeURIComponent(it.id));
         if (video.getAttribute('src') !== src) video.src = src;
         const seek = () => { try { video.currentTime = sec; } catch (e) { /* not ready */ } };
         if (video.readyState >= 1) seek(); else video.addEventListener('loadedmetadata', seek, { once: true });
       } else {
         P.offset = sec;                         // converted streams restart at the seek point
-        video.src = srvUrl('/stream/' + encodeURIComponent(it.id), { mode: P.mode, start: Math.floor(sec) });
+        video.src = srvUrl('/stream/' + encodeURIComponent(it.id), Object.assign({ mode: P.mode, start: Math.floor(sec) }, convertWants(video)));
       }
       video.play().catch(() => {});
       el.querySelector('[data-pl-mode]').textContent = P.mode === 'direct' ? (it.quality === '4K' ? '4K · Direct' : 'Direct') : P.mode === 'remux' ? 'Converting audio' : 'Converting';
@@ -798,7 +891,7 @@ const Player = {
     };
     const fallback = why => {
       const order = ['direct', 'remux', 'transcode'];
-      const nextMode = order[order.indexOf(P.mode) + 1];
+      const nextMode = directUrl ? null : order[order.indexOf(P.mode) + 1];   // straight from the cloud: no PC to convert
       const at = curTime();
       if (nextMode) { P.mode = nextMode; load(at); return; }
       el.querySelector('.pl-center').innerHTML = '';
@@ -845,7 +938,7 @@ const Player = {
       const r = seekBar.getBoundingClientRect();
       P.seekTo((e.clientX - r.left) / r.width * dur());
     });
-    el.querySelector('.pl-vol').addEventListener('input', e => { video.volume = +e.target.value; video.muted = false; store.set('vol', video.volume); });
+    el.querySelector('.pl-vol').addEventListener('input', e => P.setVolume(+e.target.value));
     el.addEventListener('click', e => {
       const b = e.target.closest('[data-pl]');
       if (!b) { if (e.target === video) togglePlay(); return; }
@@ -854,7 +947,7 @@ const Player = {
       else if (a === 'toggle') togglePlay();
       else if (a === 'rew') P.seekTo(curTime() - 10);
       else if (a === 'fwd') P.seekTo(curTime() + 10);
-      else if (a === 'mute') { video.muted = !video.muted; b.innerHTML = video.muted ? I.mute : I.vol; }
+      else if (a === 'mute') P.toggleMute();
       else if (a === 'fs') toggleFs();
       else if (a === 'next') { const nx = nextEpisodeAfter(it); if (nx) Player.open(nx, 0); }
       else if (a === 'external') { video.pause(); playExternal(it); }
@@ -877,10 +970,10 @@ const Player = {
       else if (k === 'MediaStop') Player.close();
       else if (k === 'ArrowLeft' || k === 'j' || k === 'MediaRewind') P.seekTo(curTime() - 10);
       else if (k === 'ArrowRight' || k === 'l' || k === 'MediaFastForward') P.seekTo(curTime() + 10);
-      else if (k === 'ArrowUp') { video.volume = Math.min(1, video.volume + 0.1); store.set('vol', video.volume); }
-      else if (k === 'ArrowDown') { video.volume = Math.max(0, video.volume - 0.1); store.set('vol', video.volume); }
+      else if (k === 'ArrowUp') P.setVolume(P.vol + 0.1);
+      else if (k === 'ArrowDown') P.setVolume(P.vol - 0.1);
       else if (k === 'f') toggleFs();
-      else if (k === 'm') video.muted = !video.muted;
+      else if (k === 'm') P.toggleMute();
       else if (k === 'Escape' || k === 'Backspace' || k === 'GoBack') { if (document.fullscreenElement && k === 'Escape') return; Player.close(); }
       else return;
       e.preventDefault();
@@ -902,6 +995,7 @@ const Player = {
     P.video.removeAttribute('src');
     P.video.load();
     clearTimeout(P.idleTimer);
+    if (P.video._goatMix) P.video._goatMix.ctx.close().catch(() => {});
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     P.el.remove();
     if (DESKTOP) window.goatDesktop.setPlaying(false);
@@ -961,7 +1055,6 @@ const Together = {
   attach(P) {
     this.P = P;
     this.captured = null;
-    this.audioSrc = null;
     if (!this.peer) return;
     const v = P.video;
     const go = () => { this.capture(); for (const g of this.guests.values()) this.pushTracks(g); this.guests.forEach(g => this.sendInfo(g.conn)); };
@@ -975,7 +1068,7 @@ const Together = {
   },
   // Picture: each movie frame is drawn onto a canvas that we share. (Sharing the <video> capture directly sent
   // no picture on some PCs — Chromium's encoder couldn't read those frames.) Up to 1080p, sharp at 16 Mbit/s.
-  // Sound: captured straight from the movie.
+  // Sound: our own stereo mix of the movie (see audioMix) — clear dialogue even from 5.1 surround tracks.
   capture() {
     if (!this.P) return null;
     if (!this.captured) {
@@ -995,22 +1088,66 @@ const Together = {
         v.requestVideoFrameCallback(draw);
       };
       v.requestVideoFrameCallback(draw);
-      this.audioSrc = v.captureStream();
-      // a new source (seek while converting…) swaps the sound track: hand the new one to every friend
-      this.audioSrc.addEventListener('addtrack', () => this.guests.forEach(g => this.pushTracks(g)));
-      this.captured = new MediaStream([canvas.captureStream(30).getVideoTracks()[0]]);
+      const mix = this.audioMix(this.P);
+      this.captured = new MediaStream([canvas.captureStream(30).getVideoTracks()[0], ...mix.dest.stream.getAudioTracks()]);
     }
-    const a = this.audioSrc.getAudioTracks().find(t => t.readyState === 'live');
-    const cur = this.captured.getAudioTracks()[0];
-    if (a && cur !== a) { if (cur) this.captured.removeTrack(cur); this.captured.addTrack(a); }
     return this.captured;
+  },
+  // Movies are often 5.1 surround with the voices in the CENTRE channel. A plain capture squeezes that down badly
+  // (voices quiet, effects loud). So the sound goes through a Web Audio mix, made once per <video>:
+  //   movie ─┬─ host volume ─► this PC's speakers (full surround kept)
+  //          └─ 6-channel layout ─► stereo for friends: L/R ×1, centre (dialogue) ×1 into both, surrounds ×0.6,
+  //             LFE off, then a gentle compressor so loud scenes don't clip.
+  // The <video> element's own volume would also turn friends down, so the host's volume lives in a gain node.
+  audioMix(P) {
+    const v = P.video;
+    if (v._goatMix) return v._goatMix;
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    ctx.resume().catch(() => {});
+    const src = ctx.createMediaElementSource(v);
+    const host = ctx.createGain();
+    src.connect(host).connect(ctx.destination);
+    // normalise any input (mono / stereo / 5.1) to the 6-speaker layout: mono → centre, stereo → L/R
+    const layout = ctx.createGain();
+    layout.channelCount = 6;
+    layout.channelCountMode = 'explicit';
+    layout.channelInterpretation = 'speakers';
+    src.connect(layout);
+    const split = ctx.createChannelSplitter(6);
+    layout.connect(split);
+    const merge = ctx.createChannelMerger(2);
+    const send = (ch, gain, toLeft, toRight) => {
+      const g = ctx.createGain();
+      g.gain.value = gain;
+      split.connect(g, ch);
+      if (toLeft) g.connect(merge, 0, 0);
+      if (toRight) g.connect(merge, 0, 1);
+    };
+    send(0, 1, true, false);        // front left
+    send(1, 1, false, true);        // front right
+    send(2, 1, true, true);         // centre — dialogue, kept strong in both ears
+    send(4, 0.6, true, false);      // surround left
+    send(5, 0.6, false, true);      // surround right  (channel 3 = LFE/subwoofer: left out)
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -10;
+    limiter.knee.value = 8;
+    limiter.ratio.value = 4;
+    limiter.attack.value = 0.005;
+    limiter.release.value = 0.2;
+    const dest = ctx.createMediaStreamDestination();
+    dest.channelCount = 2;
+    merge.connect(limiter).connect(dest);
+    v._goatMix = { ctx, host, dest, src, layout, split };
+    P.hostGain = host;
+    P.applyVolume();
+    return v._goatMix;
   },
   callGuest(g) {
     const s = this.capture();
     if (!s || !s.getVideoTracks().length) return;      // starts as soon as the movie is playing
     if (g.call) g.call.close();
     // codec: let the browser choose (VP8/VP9 are always available; forcing H.264 sent no picture on some PCs)
-    g.call = this.peer.call(g.conn.peer, s);
+    g.call = this.peer.call(g.conn.peer, s, { sdpTransform: opusHiFi });
     const pc = g.call.peerConnection;
     pc.addEventListener('connectionstatechange', () => { if (pc.connectionState === 'connected') this.setBitrate(g); });
   },
@@ -1020,11 +1157,15 @@ const Together = {
     const pc = g.call && g.call.peerConnection;
     if (!pc || pc.connectionState !== 'connected') return;
     for (const sender of pc.getSenders()) {
-      if (!sender.track || sender.track.kind !== 'video') continue;
+      if (!sender.track) continue;
       const p = sender.getParameters();
       if (!p.encodings || !p.encodings.length) p.encodings = [{}];
-      p.encodings[0].maxBitrate = this.perFriend();
-      p.degradationPreference = 'maintain-resolution';     // keep it sharp; frame rate gives first if the line is tight
+      if (sender.track.kind === 'audio') {
+        p.encodings[0].maxBitrate = 256000;                // movie-quality stereo sound
+      } else {
+        p.encodings[0].maxBitrate = this.perFriend();
+        p.degradationPreference = 'maintain-resolution';   // keep it sharp; frame rate gives first if the line is tight
+      }
       sender.setParameters(p).catch(() => {});
     }
   },
@@ -1122,6 +1263,18 @@ const Together = {
   },
 };
 window.__goatWT = Together;     // for troubleshooting from the developer console
+
+// Live calls default to mono "voice call" sound. Ask for full stereo at up to 510 kbit/s instead (the friend's page
+// does the same on its side — both ends have to agree).
+function opusHiFi(sdp) {
+  const m = sdp.match(/a=rtpmap:(\d+) opus\/48000\/2/i);
+  if (!m) return sdp;
+  const pt = m[1];
+  const extra = 'stereo=1;sprop-stereo=1;maxaveragebitrate=510000';
+  const fmtp = new RegExp('(a=fmtp:' + pt + ' )([^\\r\\n]*)');
+  if (fmtp.test(sdp)) return sdp.replace(fmtp, (all, head, params) => head + (params.includes('stereo=1') ? params : params + ';' + extra));
+  return sdp.replace(m[0], m[0] + '\r\na=fmtp:' + pt + ' ' + extra);
+}
 
 // Room codes: "goatstream-vyyy553k" <-> "VYYY-553K" (easy to read out and type with a remote)
 const wtCode = id => { const c = String(id || '').replace(/^goatstream-/, '').toUpperCase(); return c.length > 4 ? c.slice(0, 4) + '-' + c.slice(4) : c; };
@@ -1329,7 +1482,7 @@ async function watchScan() {
 async function renderSettings() {
   const box = $('#settings-body');
   if (!box) return;
-  if (MODE !== 'desktop' && !IS_LOCALHOST) { box.innerHTML = remoteSettingsHTML(); return; }
+  if (APP_TV || (MODE !== 'desktop' && !IS_LOCALHOST)) { box.innerHTML = remoteSettingsHTML(); return; }
   let s;
   try { s = S.settings = await api('/api/settings'); } catch (e) { box.innerHTML = `<p class="warn">${esc(e.message)}</p>`; return; }
   if (!$('#settings-body')) return;
@@ -1412,18 +1565,24 @@ async function renderSettings() {
 }
 
 function remoteSettingsHTML() {
-  const accs = TV ? store.get('accounts', []) : (S.cloudAccounts || []);
-  return `<div class="sec"><h2>🖥️ Your PC</h2>
+  const accs = APP_TV ? store.get('accounts', []) : (S.cloudAccounts || []);
+  const pcSection = APP_TV && !conn.base
+    ? `<div class="sec"><h2>🖥️ Your PC</h2>
+        <p>This TV is working on its own with your cloud drives. Link Goat Stream on a PC to also watch the movies stored on it.</p>
+        <div class="btns"><button class="btn btn-dark btn-small focusable" data-act="linkPc">Link a PC</button></div></div>`
+    : `<div class="sec"><h2>🖥️ Your PC</h2>
       <div class="li"><div class="provider pc">PC</div><div class="grow"><b>${esc(S.serverName || 'Goat Stream PC')}</b>
         <small>${S.online ? '<span class="ok">Connected</span>' : '<span class="warn">Offline</span>'} ${APP_TV ? '· ' + esc(conn.base) : ''}</small></div></div>
       <div class="btns" style="margin-top:1rem"><button class="btn btn-play btn-small focusable" data-act="refresh">Refresh library</button>
-      <button class="btn btn-dark btn-small focusable" data-act="unlink">Unlink this ${TV ? 'TV' : 'device'}</button></div></div>
+      <button class="btn btn-dark btn-small focusable" data-act="unlink">Unlink this ${APP_TV ? 'TV' : 'device'}</button></div></div>`;
+  return `${pcSection}
     <div class="sec"><h2>☁️ Cloud drives</h2>
-      <p>Add Google Drive, OneDrive or Dropbox right here: scan a QR code with your phone and sign in there.
-      ${TV ? 'Cloud movies then stream straight from the cloud — even when your PC is off.' : ''}</p>
-      ${accs.map(a => `<div class="li">${providerIcon(a.provider)}<div class="grow"><b>${SOURCE_NAMES[a.provider]}</b><small>${esc(a.name)}</small></div></div>`).join('') || '<p>None connected yet.</p>'}
+      <p>Add Google Drive, OneDrive or Dropbox: scan a QR code with your phone and sign in there.
+      ${APP_TV ? 'Cloud movies stream straight from the cloud to this TV — no PC needed.' : ''}</p>
+      ${accs.map(a => `<div class="li">${providerIcon(a.provider)}<div class="grow"><b>${SOURCE_NAMES[a.provider]}</b><small>${esc(a.name)}${a.tvOnly ? ' · on this TV' : ' · from your PC'}</small></div>
+        ${a.tvOnly ? `<button class="btn btn-dark btn-small focusable" data-act="removeTvAccount" data-id="${esc(a.id)}">Disconnect</button>` : ''}</div>`).join('') || '<p>None connected yet.</p>'}
       <div class="btns" style="margin-top:1rem"><button class="btn btn-play btn-small focusable" data-act="addCloud">${I.plus} Add cloud drive</button>
-      ${TV && accs.length ? '<button class="btn btn-dark btn-small focusable" data-act="tvCloudScan">Rescan cloud from this TV</button>' : ''}</div></div>
+      ${APP_TV && accs.length ? '<button class="btn btn-dark btn-small focusable" data-act="tvRescan">Rescan my cloud drives</button>' : ''}</div></div>
     ${appsToggleHTML()}
     ${introToggleHTML()}
     ${updatesHTML()}
@@ -1462,7 +1621,7 @@ const settingsActions = {
       if (s && s.accounts.length > before) { toast('Connected! Scanning your cloud for movies…'); renderSettings(); watchScan(); return; }
     }
   },
-  removeAccount: async el => { if (!confirm('Disconnect this cloud account?')) return; await api('/api/accounts/remove', 'POST', { id: el.dataset.id }); renderSettings(); loadLibrary(true); },
+  removeAccount: async el => { if (!await askConfirm('Disconnect this cloud account?', 'Its movies disappear from Goat Stream. You can connect it again any time.', 'Disconnect')) return; await api('/api/accounts/remove', 'POST', { id: el.dataset.id }); renderSettings(); loadLibrary(true); },
   saveKeys: async () => {
     await api('/api/settings', 'POST', {
       google: { clientId: $('#k-gid').value.trim(), clientSecret: $('#k-gsec').value.trim() }, dropbox: { appKey: $('#k-dbx').value.trim() },
@@ -1483,10 +1642,13 @@ const settingsActions = {
   setPlayer: async el => { await api('/api/settings', 'POST', { player: el.dataset.v }); renderSettings(); },
   removeDevice: async el => { await api('/api/devices/remove', 'POST', { id: el.dataset.id }); renderSettings(); },
   autostart: async el => { await window.goatDesktop.setAutostart(el.dataset.v === '1'); renderSettings(); },
-  unlink: () => { if (confirm('Unlink from your PC? You can link again any time.')) unlink(false); },
+  unlink: async () => { if (await askConfirm(`Unlink this ${APP_TV ? 'TV' : 'device'} from your PC?`, 'You can link it again any time.', 'Unlink')) unlink(false); },
   tvCloudScan: () => tvCloudScan(),
   phoneSignIn: el => openPhoneSignIn(el.dataset.provider),
   addCloud: () => openCloudPicker(),
+  removeTvAccount: async el => { if (await askConfirm('Disconnect this cloud drive from this TV?', 'Its movies disappear from this TV. You can connect it again any time.', 'Disconnect')) removeTvAccount(el.dataset.id); },
+  linkPc: () => onboarding(),
+  tvRescan: async () => { await scanTvAccounts(false); if (S.online && store.get('accounts', []).some(a => !a.tvOnly)) tvCloudScan(); },
   checkUpdates: async () => {
     if (TV) return tvCheckUpdate(true);
     const s = await window.goatDesktop.checkForUpdates();
@@ -1503,29 +1665,170 @@ const settingsActions = {
 const CLOUD_TILE = {
   gdrive: { bg: '#fff', fg: '#1a73e8' }, onedrive: { bg: '#0078d4', fg: '#fff' }, dropbox: { bg: '#0061fe', fg: '#fff' },
 };
+// Which drives this TV can sign in to by itself (Goat Stream's public app IDs are built in)
+function directReady(c) {
+  const C = (window.GOAT_CONFIG && window.GOAT_CONFIG.cloud) || {};
+  if (!APP_TV || !window.Peer || !(window.crypto && crypto.subtle) || !(window.GOAT_CONFIG && GOAT_CONFIG.oauthRelay)) return false;
+  if (c === 'gdrive') return !!(C.googleClientId && C.tokenHelper);
+  if (c === 'onedrive') return !!C.onedriveClientId;
+  return !!C.dropboxAppKey;
+}
+const anyDirect = () => CLOUDS.some(directReady);
+
 async function openCloudPicker() {
-  if (!S.online) { toast('Turn on Goat Stream on your PC first — it handles the sign-in.'); return; }
-  let info;
-  try { info = await api('/api/cloud/providers'); } catch (e) { toast(e.message); return; }
+  // PC route (older): only when the TV can't do it itself
+  let info = { phoneSignIn: false, providers: {}, accounts: [] };
+  if (S.online) { try { info = await api('/api/cloud/providers'); } catch (e) { /* PC busy */ } }
   S.cloudAccounts = info.accounts;
+  const mine = APP_TV ? store.get('accounts', []) : info.accounts;
+  if (!anyDirect() && !S.online) { toast('Cloud sign-in isn\'t available in this version yet.'); return; }
+  const route = c => (directReady(c) ? 'tv' : info.phoneSignIn && info.providers[SIGNIN[c]] ? 'pc' : '');
   const ov = openOverlay(`<div class="dialog" style="width:min(48rem,100%)">
     <h2>Add a cloud drive</h2>
-    <p>Pick one — a QR code appears, scan it with your phone and sign in there.</p>
+    <p>Pick one — a QR code appears. Scan it with your phone and sign in there. That's it.</p>
     <div class="cloud-tiles">${CLOUDS.map(c => {
-      const ready = info.phoneSignIn && info.providers[SIGNIN[c]];
-      const n = info.accounts.filter(a => a.provider === c).length;
-      return `<button class="cloud-tile focusable" ${ready ? '' : 'disabled'} data-provider="${SIGNIN[c]}" style="--bg:${CLOUD_TILE[c].bg};--fg:${CLOUD_TILE[c].fg}">
+      const r = route(c);
+      const n = mine.filter(a => a.provider === c).length;
+      return `<button class="cloud-tile focusable" ${r ? '' : 'disabled'} data-cloud="${c}" data-route="${r}" style="--bg:${CLOUD_TILE[c].bg};--fg:${CLOUD_TILE[c].fg}">
         <span class="ct-logo">${PROVIDER_BADGE[c][1]}</span><b>${SOURCE_NAMES[c]}</b>
-        <small>${ready ? (n ? `${n} connected · add another` : 'Scan with your phone') : 'Needs a one-time setup on your PC'}</small></button>`;
+        <small>${r ? (n ? `${n} connected · add another` : 'Scan with your phone') : 'Coming soon'}</small></button>`;
     }).join('')}</div>
-    ${CLOUDS.some(c => !(info.phoneSignIn && info.providers[SIGNIN[c]])) ? `<p style="color:#999;font-size:.85rem;margin-top:1rem">Greyed out? On your PC open Goat Stream → Settings → Cloud drives → App keys (see the README).</p>` : ''}
     <div class="btns"><button class="btn btn-dark focusable" data-act="closeOverlay">Close</button></div></div>`);
   ov.addEventListener('click', e => {
     const b = e.target.closest('.cloud-tile');
     if (!b || b.disabled) return;
     closeOverlay(ov);
-    openPhoneSignIn(b.dataset.provider);
+    if (b.dataset.route === 'tv') openDirectSignIn(b.dataset.cloud);
+    else openPhoneSignIn(SIGNIN[b.dataset.cloud]);
   });
+}
+
+// ---------- TV signs in by itself ----------
+// QR code → phone opens the hand-off page → Google / Microsoft / Dropbox sign-in on the phone → the hand-off page
+// gives the one-time code to THIS TV over an encrypted peer-to-peer link → the TV finishes the sign-in (PKCE:
+// the code is useless without a secret only this TV knows). Google's own app secret stays in the sign-in helper.
+const b64url = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const randId = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => 'abcdefghjkmnpqrstuvwxyz23456789'[b % 31]).join('');
+const shortHash = s => { let h = 5381; for (const ch of String(s)) h = ((h * 33) ^ ch.charCodeAt(0)) >>> 0; return h.toString(16); };
+
+async function exchangeTvCode(c, code, verifier) {
+  const C = GOAT_CONFIG.cloud, relay = GOAT_CONFIG.oauthRelay;
+  const helper = (C.tokenHelper || '').replace(/\/+$/, '');
+  const provider = SIGNIN[c];
+  // Google always via the helper (it holds Google's secret); Samsung/LG via the helper too (their browser engine
+  // blocks the direct request); Android TV talks to Microsoft / Dropbox directly
+  const viaHelper = c === 'gdrive' || (!TV && !!helper);
+  const clientId = c === 'gdrive' ? C.googleClientId : c === 'onedrive' ? C.onedriveClientId : C.dropboxAppKey;
+  let r;
+  if (viaHelper) {
+    r = await http('POST', helper + '/token', { 'Content-Type': 'application/json' },
+      JSON.stringify({ provider, grant_type: 'authorization_code', code, code_verifier: verifier, redirect_uri: relay }));
+  } else {
+    const form = new URLSearchParams({ grant_type: 'authorization_code', code, client_id: clientId, code_verifier: verifier, redirect_uri: relay });
+    if (c === 'onedrive') form.set('scope', window.GoatCloud.ONEDRIVE_SCOPE);
+    r = await http('POST', window.GoatCloud.TOKEN_URLS[c], { 'Content-Type': 'application/x-www-form-urlencoded' }, form.toString());
+  }
+  let d = {};
+  try { d = JSON.parse(r.text); } catch (e) { /* not json */ }
+  if (!d.refresh_token) throw new Error(d.error_description || d.error || (r.status ? 'Sign-in was refused (' + r.status + ')' : 'No internet connection'));
+  // who signed in (shown in Settings)
+  let name = SOURCE_NAMES[c];
+  try {
+    if (c === 'gdrive' && d.id_token) name = JSON.parse(atob(d.id_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).email || name;
+    if (c === 'onedrive') { const me = JSON.parse((await http('GET', 'https://graph.microsoft.com/v1.0/me?$select=userPrincipalName,mail,displayName', { Authorization: 'Bearer ' + d.access_token })).text); name = me.mail || me.userPrincipalName || me.displayName || name; }
+    if (c === 'dropbox') { const me = JSON.parse((await http('POST', 'https://api.dropboxapi.com/2/users/get_current_account', { Authorization: 'Bearer ' + d.access_token, 'Content-Type': 'application/json' }, 'null')).text); name = me.email || (me.name && me.name.display_name) || name; }
+  } catch (e) { /* keep the generic name */ }
+  const acc = {
+    id: PROVIDER_BADGE[c][0] + 'tv' + shortHash(name + c), provider: c, name, clientId, refreshToken: d.refresh_token,
+    accessToken: d.access_token, expiresAt: Date.now() + (d.expires_in || 3600) * 1000, tvOnly: true,
+  };
+  if (viaHelper) acc.helper = helper;
+  return acc;
+}
+
+async function openDirectSignIn(c) {
+  const name = SOURCE_NAMES[c];
+  const C = GOAT_CONFIG.cloud;
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(48)));
+  const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+  const nonce = randId(10), peerId = 'goatsignin-' + randId(12);
+  const expected = `tv~${peerId}~${SIGNIN[c]}~${nonce}`;
+  const ov = openOverlay(`<div class="dialog" style="width:min(42rem,100%)">
+    <h2>Connect ${esc(name)}</h2>
+    <div id="ds-body"><div class="spinner" style="margin:2.5rem auto"></div><p>Getting your QR code ready…</p></div>
+    <div class="btns"><button class="btn btn-dark focusable" data-autofocus data-act="closeOverlay">Cancel</button></div></div>`,
+  { onClose: () => setTimeout(() => peer.destroy(), 3000) });
+  const body = ov.querySelector('#ds-body');
+  const peer = new window.Peer(peerId, { config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }] } });
+  const status = html => { const s = ov.querySelector('#ds-status'); if (s) s.innerHTML = html; };
+  peer.on('error', e => { if (document.contains(ov)) body.innerHTML = `<p class="warn">Can't start sign-in — ${e.type === 'network' || e.type === 'server-error' ? 'check this TV\'s internet connection' : esc(e.message || e.type)}.</p>`; });
+  peer.on('open', () => {
+    const cid = c === 'gdrive' ? C.googleClientId : c === 'onedrive' ? C.onedriveClientId : C.dropboxAppKey;
+    const url = GOAT_CONFIG.oauthRelay + '?' + new URLSearchParams({ go: SIGNIN[c], cid, tv: peerId, cc: challenge, n: nonce });
+    body.innerHTML = `<div class="getpc" style="margin-top:1rem">
+      <div class="qr" style="width:14rem;height:14rem">${qrSvg(url)}</div>
+      <div><ol style="font-size:1.05rem;line-height:1.7">
+        <li>Point your phone's <b>camera</b> at the code and tap the link.</li>
+        <li>Sign in to ${esc(name)} with your email and password.</li>
+        <li>Done — this TV updates by itself.</li></ol>
+        <p style="color:#999;font-size:.85rem">Your password is typed on your phone only. The TV never sees it.</p></div></div>
+      <p id="ds-status" style="margin-top:1rem"><span class="spinner" style="display:inline-block;width:1.2rem;height:1.2rem;vertical-align:middle;border-width:3px"></span>&nbsp; Waiting for you to sign in on your phone…</p>`;
+  });
+  peer.on('connection', conn => {
+    conn.on('data', async d => {
+      if (!d || d.t !== 'code' || d.state !== expected) return;
+      status('<span class="spinner" style="display:inline-block;width:1.2rem;height:1.2rem;vertical-align:middle;border-width:3px"></span>&nbsp; Signed in on your phone — finishing up…');
+      try {
+        const acc = await exchangeTvCode(c, d.code, verifier);
+        const accs = store.get('accounts', []).filter(a => a.id !== acc.id);
+        accs.push(acc);
+        store.set('accounts', accs);
+        conn.send({ t: 'done', name: acc.name });
+        status(`<span class="ok">✓ ${esc(name)} connected — ${esc(acc.name)}</span>`);
+        toast(`${name} connected! Finding your movies…`);
+        setTimeout(() => { if (document.contains(ov)) closeOverlay(ov); }, 1800);
+        await scanTvAccounts(false);
+        if (S.page === 'settings') render();
+      } catch (e) {
+        conn.send({ t: 'error', error: e.message });
+        status(`<span class="warn">${esc(e.message)}. Close this and try again.</span>`);
+      }
+    });
+  });
+}
+
+// Find the movies in the drives signed in on this TV (works with no PC at all)
+async function scanTvAccounts(quiet) {
+  const accs = store.get('accounts', []);
+  const mine = accs.filter(a => a.tvOnly);
+  if (!mine.length) return;
+  if (!quiet) toast('Looking for movies in your cloud drives…');
+  const old = Object.fromEntries(tvOnlyItems().map(i => [i.id, i]));
+  const items = [];
+  for (const a of mine) {
+    try {
+      for (const it of await cloud.list(a)) items.push(Object.assign({}, old[it.id], it, { added: (old[it.id] && old[it.id].added) || it.added || Date.now() }));
+    } catch (e) {
+      if (!quiet) toast(SOURCE_NAMES[a.provider] + ': ' + e.message);
+      items.push(...Object.values(old).filter(i => i.cloud && i.cloud.accountId === a.id));
+    }
+  }
+  store.set('accounts', accs);            // tokens may have been refreshed
+  store.set('tvItems', items);
+  store.set('tvScanAt', Date.now());
+  const base = S.online ? S.items.filter(i => !(i.cloud && mine.some(a => a.id === i.cloud.accountId))) : (conn.base ? store.get('lib', []) : []);
+  S.items = withTvItems(base);
+  buildTitles();
+  render();
+  if (!quiet) toast(items.length ? `Found ${items.length} video${items.length === 1 ? '' : 's'} 🎬` : 'No videos found in that drive yet.');
+}
+
+function removeTvAccount(id) {
+  store.set('accounts', store.get('accounts', []).filter(a => a.id !== id));
+  store.set('tvItems', tvOnlyItems().filter(i => !(i.cloud && i.cloud.accountId === id)));
+  S.items = S.items.filter(i => !(i.cloud && i.cloud.accountId === id));
+  buildTitles();
+  render();
 }
 
 // Sign in to a cloud drive by scanning a QR code with your phone
@@ -1567,7 +1870,8 @@ async function openPhoneSignIn(provider) {
 
 // Scan cloud drives straight from the TV (works with the PC off)
 async function tvCloudScan() {
-  const accs = store.get('accounts', []);
+  const all = store.get('accounts', []);
+  const accs = all.filter(a => !a.tvOnly);          // drives shared by the PC (the TV's own drives: scanTvAccounts)
   toast('Scanning your cloud drives…');
   const old = Object.fromEntries(S.items.map(i => [i.id, i]));
   const items = S.items.filter(i => !(i.cloud && accs.some(a => a.id === i.cloud.accountId)));
@@ -1579,15 +1883,18 @@ async function tvCloudScan() {
       items.push(...S.items.filter(i => i.cloud && i.cloud.accountId === a.id));
     }
   }
-  store.set('accounts', accs);
-  S.items = items;
-  store.set('lib', items);
+  store.set('accounts', all);                       // tokens may have been refreshed (same objects)
+  const pcItems = items.filter(i => !tvOnlyItems().some(t => t.id === i.id));
+  S.items = withTvItems(pcItems);
+  store.set('lib', pcItems);
   buildTitles();
   render();
   toast('Cloud library updated');
 }
 
 function unlink(expired) {
+  // unlinking on purpose: tell the PC to forget this device too (it then disappears from the PC's device list)
+  if (!expired && conn.token) api('/api/devices/forget', 'POST', {}).catch(() => {});
   conn.token = '';
   store.set('token', '');
   if (APP_TV) { conn.base = ''; store.set('server', ''); }
@@ -1638,8 +1945,15 @@ function pcDownloadHTML() {
   </div>`;
 }
 
+function standaloneOfferHTML() {
+  return `<div class="getpc" style="justify-content:space-between">
+    <div><b class="getpc-title">☁️ No PC? No problem.</b>
+      <p>Use Goat Stream on this TV by itself — just sign in to Google Drive, OneDrive or Dropbox with your phone.</p></div>
+    <button class="btn btn-play focusable" data-ob="standalone" style="flex:none">Use without a PC</button></div>`;
+}
 function obSearch() {
-  obStep(`<p>Looking for Goat Stream on your PC…</p><div class="spinner" style="margin:2rem auto"></div>`);
+  obStep(`<p>Looking for Goat Stream on your PC…</p><div class="spinner" style="margin:2rem auto"></div>
+    ${anyDirect() ? standaloneOfferHTML() : ''}`);
   window.goatDiscovered = json => {
     let list = [];
     try { list = JSON.parse(json); } catch (e) { /* none */ }
@@ -1648,6 +1962,7 @@ function obSearch() {
       <div class="server-list">${list.map(s => `<button class="server focusable" data-ob="pick" data-url="http://${esc(s.host)}:${s.port}" data-name="${esc(s.name)}">${I.tv}<div><b>${esc(s.name)}</b><small>${esc(s.host)}</small></div></button>`).join('')}</div>
       <div class="btns" style="justify-content:center"><button class="btn btn-play focusable" data-ob="retry">Search again</button>
       <button class="btn btn-dark focusable" data-ob="manual">Enter PC address</button></div>
+      ${anyDirect() ? standaloneOfferHTML() : ''}
       ${list.length ? '' : pcDownloadHTML()}`);
   };
   if (TV) window.GoatTV.discover();
@@ -1744,6 +2059,15 @@ document.addEventListener('click', e => {
   const b = e.target.closest('[data-ob]');
   if (!b) return;
   const a = b.dataset.ob;
+  if (a === 'standalone') {
+    store.set('standalone', true);
+    window.goatDiscovered = () => {};                 // ignore a search still running
+    const ob = $('.onboard');
+    if (ob) ob.remove();
+    S.page = 'home';
+    loadLibrary(true).then(() => { if (!store.get('accounts', []).some(x => x.tvOnly)) openCloudPicker(); });
+    return;
+  }
   if (a === 'retry') { obSearch.retried = true; obSearch(); }
   else if (a === 'pick') obPair(b.dataset.url, b.dataset.name);
   else if (a === 'again') obPair(b.dataset.url || (APP_TV ? conn.base : location.origin));
@@ -1994,7 +2318,7 @@ async function boot() {
   await loadLibrary(MODE === 'desktop');
   desktopUpdates();
   if (TV) setTimeout(() => tvCheckUpdate(false), 6000);
-  if (MODE === 'desktop' || IS_LOCALHOST) {
+  if (canAdmin()) {
     api('/api/settings').then(s => { S.settings = s; }).catch(() => {});
     setInterval(pollPairRequests, 2000);
     if (S.scanning) watchScan();

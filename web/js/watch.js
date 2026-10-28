@@ -4,6 +4,16 @@
   const $ = id => document.getElementById(id);
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const REACTIONS = ['😂', '😮', '🔥', '❤️', '👏', '🐐'];
+  // Ask for full stereo movie sound (up to 510 kbit/s) instead of mono call audio — same as the host's side.
+  function opusHiFi(sdp) {
+    const m = sdp.match(/a=rtpmap:(\d+) opus\/48000\/2/i);
+    if (!m) return sdp;
+    const pt = m[1];
+    const extra = 'stereo=1;sprop-stereo=1;maxaveragebitrate=510000';
+    const fmtp = new RegExp('(a=fmtp:' + pt + ' )([^\\r\\n]*)');
+    if (fmtp.test(sdp)) return sdp.replace(fmtp, (all, head, params) => head + (params.includes('stereo=1') ? params : params + ';' + extra));
+    return sdp.replace(m[0], m[0] + '\r\na=fmtp:' + pt + ' ' + extra);
+  }
   const hostId = decodeURIComponent(location.hash.slice(1));
   const video = $('v');
   // ?embedded=1: shown inside the Goat Stream app (TV / PC) rather than as a web page
@@ -60,7 +70,7 @@
       conn.on('close', () => message('The session has ended. Thanks for watching! 🐐'));
     });
     peer.on('call', call => {
-      call.answer();                                   // we only receive
+      call.answer(undefined, { sdpTransform: opusHiFi }); // we only receive — in full-quality stereo
       window.__wtCall = call;                          // handy when troubleshooting from the browser console
       call.on('stream', stream => {
         if (video.srcObject === stream) return;        // PeerJS reports the same stream once per track

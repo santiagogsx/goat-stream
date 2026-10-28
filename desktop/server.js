@@ -33,6 +33,7 @@ const ffmpegPath = (() => {
 })();
 
 const rand = n => crypto.randomBytes(n).toString('hex');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 const b64url = buf => buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const sha = s => crypto.createHash('sha1').update(s).digest('hex');
 
@@ -91,6 +92,8 @@ function start({ dataDir, webDir, appKeys, version }) {
     googleSecret: db.settings.google.clientSecret || (appKeys.google && appKeys.google.clientSecret) || '',
     dropboxKey: db.settings.dropbox.appKey || (appKeys.dropbox && appKeys.dropbox.appKey) || '',
     onedriveId: db.settings.onedrive.clientId || (appKeys.onedrive && appKeys.onedrive.clientId) || '',
+    // Goat Stream's sign-in helper (cloud-helper/): finishes Google sign-ins so no app needs Google's secret
+    tokenHelper: (db.settings.tokenHelper || appKeys.tokenHelper || '').trim(),
   });
 
   const cloud = GoatCloud.create(async (method, url, headers, body) => {
@@ -166,13 +169,26 @@ function start({ dataDir, webDir, appKeys, version }) {
         (err, so, se) => res({ ok: !err, err: String(se || '') }));
     });
   }
+  const PROBE_VERSION = 2;                       // bump to re-check every local movie
+  const STILL_CODECS = ['png', 'mjpeg', 'bmp', 'gif', 'webp', 'tiff'];
   function parseProbe(text) {
     const pr = {};
     const d = text.match(/Duration: (\d+):(\d+):(\d+\.?\d*)/);
     if (d) pr.duration = Math.round(+d[1] * 3600 + +d[2] * 60 + +d[3]);
-    const v = text.match(/Stream #\d+:\d+[^:]*: Video: (\w+)[^\n]*?(\d{3,5})x(\d{3,5})/);
-    if (v) { pr.vcodec = v[1]; pr.width = +v[2]; pr.height = +v[3]; }
-    const vline = (text.match(/Stream #\d+:\d+[^:]*: Video:[^\n]*/) || [''])[0];
+    // the movie's real video track: skip cover pictures (MKVs often store them as an extra PNG/JPEG "video" track)
+    pr.v = PROBE_VERSION;
+    const vids = [...text.matchAll(/Stream #\d+:\d+[^:\n]*: Video: (\w+)[^\n]*/g)];
+    let vi = vids.findIndex(m => !/attached pic/.test(m[0]) && !STILL_CODECS.includes(m[1]));
+    if (vi < 0 && vids.length) vi = 0;
+    const vline = vi >= 0 ? vids[vi][0] : '';
+    if (vi >= 0) {
+      pr.vIndex = vi;
+      pr.vcodec = vids[vi][1];
+      const dim = vline.match(/(\d{3,5})x(\d{3,5})/);
+      if (dim) { pr.width = +dim[1]; pr.height = +dim[2]; }
+      const pix = vline.match(/\b(yuvj?\d{3}p\w*|nv12|nv21|p010\w*|gbrp\w*|rgb\w+|bgr\w+)/);
+      if (pix) pr.pix = pix[1];
+    }
     pr.hdr = /smpte2084|arib-std-b67|bt2020/.test(vline);
     if (/dovi|dolby vision/i.test(text)) pr.dv = true;
     const a = text.match(/Stream #\d+:\d+[^:]*: Audio: ([\w-]+)[^\n]*?(\d+\.\d|stereo|mono)?/);
@@ -308,7 +324,7 @@ function start({ dataDir, webDir, appKeys, version }) {
     }
     await cacheAllArt();
     // local thumbnails + codec info, two at a time
-    const todo = Object.values(db.items).filter(it => it.source === 'local' && !it.probe);
+    const todo = Object.values(db.items).filter(it => it.source === 'local' && (!it.probe || it.probe.v !== PROBE_VERSION));
     let i = 0;
     const worker = async () => { while (i < todo.length) { const it = todo[i++]; await probeAndThumb(it); if (i % 5 === 0) save(); } };
     await Promise.all([worker(), worker()]);
@@ -354,7 +370,7 @@ function start({ dataDir, webDir, appKeys, version }) {
     };
     if (it.probe) {
       const p = it.probe;
-      o.probe = { vcodec: p.vcodec, acodec: p.acodec, width: p.width, height: p.height, duration: p.duration };
+      o.probe = { vcodec: p.vcodec, acodec: p.acodec, width: p.width, height: p.height, duration: p.duration, pix: p.pix };
       if (p.width >= 3200 || p.height >= 1800) o.quality = '4K'; else if (!o.quality && (p.width >= 1200 || p.height >= 700)) o.quality = 'HD';
       if (p.hdr || p.dv) o.hdr = true;
       if (!o.duration) o.duration = p.duration;
@@ -392,31 +408,99 @@ function start({ dataDir, webDir, appKeys, version }) {
 
   // mode 'remux': keep the original video untouched, convert only the audio  (cheap, full 4K/HDR quality)
   // mode 'transcode': re-encode video to H.264 with the GPU when available
-  async function convert(req, res, input, inputHeaders, it, mode, startSec) {
+  // opts.hls    → Apple HLS (iPhone / iPad / Safari only accept converted video in this form)
+  // opts.maxh   → highest picture height the device wants (phones: 1080 — many reject 4K H.264)
+  // opts.stereo → stereo sound (phones / laptops; 5.1 AAC is refused by some)
+  async function convert(req, res, input, inputHeaders, it, mode, startSec, opts) {
+    opts = opts || {};
     if (!ffmpegPath) return sendJson(res, 501, { error: 'Format converter (ffmpeg) is missing on the PC.' });
     const args = ['-hide_banner', '-loglevel', 'error'];
     if (startSec > 0) args.push('-ss', String(startSec));
     if (inputHeaders && Object.keys(inputHeaders).length) {
       args.push('-headers', Object.entries(inputHeaders).map(([k, v]) => `${k}: ${v}`).join('\r\n') + '\r\n');
     }
-    args.push('-i', input, '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn', '-map_chapters', '-1');
+    // 0:V = the real video track — skips the cover picture many MKVs carry as an extra "video" track
+    const vmap = it.probe && Number.isInteger(it.probe.vIndex) ? `0:v:${it.probe.vIndex}` : '0:V:0';
+    args.push('-i', input, '-map', vmap, '-map', '0:a:0?', '-sn', '-dn', '-map_chapters', '-1');
     if (mode === 'remux') {
       args.push('-c:v', 'copy');
       if (it.probe && it.probe.vcodec === 'hevc') args.push('-tag:v', 'hvc1');
     } else {
       const enc = await pickEncoder();
-      const maxH = enc.hw ? 2160 : 1080;      // software can't convert 4K in real time
+      const maxH = Math.min(enc.hw ? 2160 : 1080, opts.maxh || 2160);   // software can't convert 4K in real time
       args.push(...enc.args, '-vf', `scale=-2:min(ih\\,${maxH}),format=yuv420p`, '-g', '96');
     }
-    // audio: keep surround (up to 5.1) at high bitrate
-    args.push('-c:a', 'aac', '-b:a', '640k', '-af', 'aformat=channel_layouts=5.1|stereo|mono',
-      '-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+default_base_moof', 'pipe:1');
+    // audio: keep surround (up to 5.1) at high bitrate — or clean stereo for phones
+    if (opts.stereo) args.push('-c:a', 'aac', '-b:a', '256k', '-ac', '2');
+    else args.push('-c:a', 'aac', '-b:a', '640k', '-af', 'aformat=channel_layouts=5.1|stereo|mono');
+
+    if (opts.hls) return startHls(res, args, mode);
+    args.push('-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+default_base_moof', 'pipe:1');
     const proc = spawn(ffmpegPath, args, { windowsHide: true });
     res.writeHead(200, { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store', 'X-Goat-Mode': mode });
     proc.stdout.pipe(res);
     proc.stderr.on('data', d => console.warn('[ffmpeg]', String(d).trim()));
     proc.on('close', () => res.end());
     res.on('close', () => { try { proc.kill('SIGKILL'); } catch (e) { /* already gone */ } });
+  }
+
+  // ---------- HLS (converted video for iPhone / iPad / Safari) ----------
+  // ffmpeg writes 4-second pieces into a private folder; the phone reads the playlist as it grows.
+  // The session id in the address is the key (unguessable), so the phone's player needs no extra login.
+  const hlsRoot = path.join(dataDir, 'hls');
+  fs.rmSync(hlsRoot, { recursive: true, force: true });
+  fs.mkdirSync(hlsRoot, { recursive: true });
+  const hlsSessions = new Map();     // sid -> { proc, dir, last }
+  function endHls(sid) {
+    const s = hlsSessions.get(sid);
+    if (!s) return;
+    hlsSessions.delete(sid);
+    try { s.proc.kill('SIGKILL'); } catch (e) { /* gone */ }
+    setTimeout(() => fs.rm(s.dir, { recursive: true, force: true }, () => {}), 1500);
+  }
+  setInterval(() => { for (const [sid, s] of hlsSessions) if (Date.now() - s.last > 90000) endHls(sid); }, 30000).unref();
+
+  async function startHls(res, args, mode) {
+    const sid = rand(16);
+    const dir = path.join(hlsRoot, sid);
+    fs.mkdirSync(dir, { recursive: true });
+    // ffmpeg runs inside the session folder with plain names (it writes init.mp4 relative to its working folder)
+    args.push('-f', 'hls', '-hls_time', '4', '-hls_list_size', '0', '-hls_playlist_type', 'event',
+      '-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', 'init.mp4', '-hls_flags', 'independent_segments+temp_file',
+      '-hls_segment_filename', 'seg%05d.m4s', 'index.m3u8');
+    const proc = spawn(ffmpegPath, args, { windowsHide: true, cwd: dir });
+    let failed = '';
+    proc.stderr.on('data', d => { failed += String(d); console.warn('[ffmpeg hls]', String(d).trim()); });
+    hlsSessions.set(sid, { proc, dir, last: Date.now() });
+    // answer once the first piece is ready (or ffmpeg gave up)
+    const list = path.join(dir, 'index.m3u8');
+    let exited = false;
+    proc.on('close', () => { exited = true; });
+    for (let i = 0; i < 100; i++) {
+      await sleep(200);
+      let txt = '';
+      try { txt = fs.readFileSync(list, 'utf8'); } catch (e) { /* not yet */ }
+      if (txt.includes('#EXTINF')) {
+        res.writeHead(302, { Location: `/hls/${sid}/index.m3u8`, 'Cache-Control': 'no-store', 'X-Goat-Mode': mode });
+        return res.end();
+      }
+      if (exited) break;
+    }
+    endHls(sid);
+    return sendJson(res, 500, { error: 'Converting failed' + (failed ? ': ' + failed.trim().split('\n').pop() : '') });
+  }
+
+  function serveHls(req, res, p) {
+    const [, , sid, file] = p.split('/');
+    const s = hlsSessions.get(sid);
+    if (!s || !/^[\w.-]+$/.test(file || '')) return sendJson(res, 404, { error: 'This converted stream has ended' });
+    s.last = Date.now();
+    const type = file.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : 'video/mp4';
+    fs.readFile(path.join(s.dir, file), (err, buf) => {
+      if (err) return sendJson(res, 404, { error: 'Not ready' });
+      res.writeHead(200, { 'Content-Type': type, 'Content-Length': buf.length, 'Cache-Control': file.endsWith('.m3u8') ? 'no-store' : 'no-cache' });
+      res.end(buf);
+    });
   }
 
   // ---------- HTTP helpers ----------
@@ -474,7 +558,13 @@ function start({ dataDir, webDir, appKeys, version }) {
       save();
       input = info.url; inputHeaders = info.headers;
     }
-    if (mode === 'remux' || mode === 'transcode') return convert(req, res, input, inputHeaders, it, mode, startSec);
+    if (mode === 'remux' || mode === 'transcode') {
+      return convert(req, res, input, inputHeaders, it, mode, startSec, {
+        hls: u.searchParams.get('hls') === '1',
+        maxh: Math.max(360, Math.min(2160, +u.searchParams.get('maxh') || 2160)),
+        stereo: u.searchParams.get('stereo') === '1',
+      });
+    }
     if (it.source === 'local') return sendFile(req, res, it.path, VIDEO_TYPES[path.extname(it.path).toLowerCase()] || 'application/octet-stream');
     // Cloud files pass through the PC (range requests kept, so seeking works). Keeping them on this address lets
     // the PC player share them in Watch Together. (TVs stream cloud files directly, not through here.)
@@ -503,8 +593,11 @@ function start({ dataDir, webDir, appKeys, version }) {
   const PROVIDER_NAMES = { google: 'Google Drive', dropbox: 'Dropbox', onedrive: 'OneDrive' };
   const hasKeys = provider => {
     const k = keys();
-    return provider === 'google' ? !!(k.googleId && k.googleSecret) : provider === 'onedrive' ? !!k.onedriveId : !!k.dropboxKey;
+    if (provider === 'google') return !!(k.googleId && (k.googleSecret || (k.tokenHelper && relayUrl())));
+    return provider === 'onedrive' ? !!k.onedriveId : !!k.dropboxKey;
   };
+  // Google without a secret on this PC: sign in through the hand-off page + sign-in helper
+  const googleViaHelper = () => { const k = keys(); return !k.googleSecret && !!k.tokenHelper && !!relayUrl(); };
   function authUrl(provider, redirect, state, challenge) {
     const k = keys();
     if (provider === 'onedrive') {
@@ -567,17 +660,26 @@ function start({ dataDir, webDir, appKeys, version }) {
         return res.end(doneHtml(false, 'Use the QR code to sign in from your phone'));
       }
       if (!hasKeys(provider)) return res.end(doneHtml(false, `Add your ${PROVIDER_NAMES[provider]} app keys in Settings first`));
+      let viaRelay = !!phoneKey;
+      if (provider === 'google' && googleViaHelper() && !phoneKey) {
+        // the sign-in helper only finishes sign-ins that come back through the hand-off page
+        const host = phoneHost(req);
+        if (!host) return res.end(doneHtml(false, 'This PC isn\'t connected to a home network'));
+        redirect = relayUrl();
+        prefix = `${host}~${provider}~`;
+        viaRelay = true;
+      }
       const state = prefix + rand(16), verifier = b64url(crypto.randomBytes(48));
       const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
       for (const [s, pd] of oauthPending) if (Date.now() - pd.t > 30 * 60000) oauthPending.delete(s);
-      oauthPending.set(state, { provider, verifier, redirect, phoneKey, t: Date.now() });
+      oauthPending.set(state, { provider, verifier, redirect, phoneKey, viaRelay, t: Date.now() });
       res.writeHead(302, { Location: authUrl(provider, redirect, state, challenge) });
       return res.end();
     }
     // callback
     const state = u.searchParams.get('state');
     const pend = oauthPending.get(state);
-    if (!local && !(pend && pend.phoneKey)) return res.end(doneHtml(false, 'Sign-in link not recognised'));
+    if (!local && !(pend && pend.viaRelay)) return res.end(doneHtml(false, 'Sign-in link not recognised'));
     oauthPending.delete(state);
     const link = pend && pend.phoneKey ? phoneLinks.get(pend.phoneKey) : null;
     const fail = msg => { if (link) { link.state = 'error'; link.error = msg; } return res.end(doneHtml(false, msg)); };
@@ -586,14 +688,21 @@ function start({ dataDir, webDir, appKeys, version }) {
     try {
       let acc;
       if (provider === 'google') {
-        const r = await fetch('https://oauth2.googleapis.com/token', {
-          method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({ code, client_id: k.googleId, client_secret: k.googleSecret, redirect_uri: pend.redirect, grant_type: 'authorization_code', code_verifier: pend.verifier }),
-        });
+        const helper = !k.googleSecret ? k.tokenHelper.replace(/\/+$/, '') : '';
+        const r = helper
+          ? await fetch(helper + '/token', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ provider: 'google', grant_type: 'authorization_code', code, code_verifier: pend.verifier, redirect_uri: pend.redirect }),
+          })
+          : await fetch('https://oauth2.googleapis.com/token', {
+            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ code, client_id: k.googleId, client_secret: k.googleSecret, redirect_uri: pend.redirect, grant_type: 'authorization_code', code_verifier: pend.verifier }),
+          });
         const d = await r.json();
         if (!d.refresh_token) throw new Error(d.error_description || d.error || 'No refresh token');
         const claims = JSON.parse(Buffer.from(d.id_token.split('.')[1], 'base64url').toString());
         acc = { id: 'g' + sha(claims.email).slice(0, 10), provider: 'gdrive', name: claims.email, clientId: k.googleId, clientSecret: k.googleSecret, refreshToken: d.refresh_token, accessToken: d.access_token, expiresAt: Date.now() + d.expires_in * 1000 };
+        if (helper) acc.helper = helper;
       } else if (provider === 'onedrive') {
         const r = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
           method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -663,6 +772,7 @@ function start({ dataDir, webDir, appKeys, version }) {
     }
     if (p.startsWith('/oauth/')) return oauth(req, res, u, local);
 
+    if (p.startsWith('/hls/')) return serveHls(req, res, p);     // the session id is the key (see startHls)
     const isApi = p.startsWith('/api/') || p.startsWith('/stream/') || p.startsWith('/thumb/') || p.startsWith('/art/');
     if (!isApi) return serveStatic(req, res, p);
 
@@ -707,7 +817,7 @@ function start({ dataDir, webDir, appKeys, version }) {
     }
     if (p === '/api/cloud/accounts') {
       // linked TVs stream straight from the cloud with these (works even when the PC is off later)
-      return sendJson(res, 200, { accounts: db.accounts.map(a => ({ id: a.id, provider: a.provider, name: a.name, clientId: a.clientId, clientSecret: a.clientSecret, refreshToken: a.refreshToken, root: a.root })) });
+      return sendJson(res, 200, { accounts: db.accounts.map(a => ({ id: a.id, provider: a.provider, name: a.name, clientId: a.clientId, clientSecret: a.clientSecret, refreshToken: a.refreshToken, root: a.root, helper: a.helper })) });
     }
 
     // which cloud drives a TV can connect right now (app keys set on the PC + hand-off page available)
@@ -728,6 +838,11 @@ function start({ dataDir, webDir, appKeys, version }) {
       const l = phoneLinks.get(p.split('/').pop());
       if (!l) return sendJson(res, 404, { state: 'expired' });
       return sendJson(res, 200, { state: l.state, name: l.name, error: l.error });
+    }
+    // a linked TV unlinking itself: forget its key so it leaves the PC's device list
+    if (p === '/api/devices/forget' && req.method === 'POST') {
+      if (device) { delete db.devices[token]; save(); events.emit('device-forgotten', device.name); }
+      return sendJson(res, 200, { ok: true });
     }
 
     // ---- PC-only admin ----

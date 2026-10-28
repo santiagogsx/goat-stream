@@ -1,0 +1,9 @@
+# Deploy: npx wrangler deploy   (from this folder, after `npx wrangler login`)
+name = "goat-stream-signin"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+[vars]
+REDIRECT_URI = "https://santiagogsx.github.io/goat-stream/relay/oauth.html"
+# Set these in the Cloudflare dashboard (or: npx wrangler secret put GOOGLE_CLIENT_SECRET):
+#   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, ONEDRIVE_CLIENT_ID, DROPBOX_APP_KEY

@@ -20,16 +20,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      # built-in cloud keys come from a repository secret, so they never sit in the public code
+      - name: Build in cloud keys
+        run: node scripts/inject-keys.js
+        env:
+          GOAT_CONFIG_JSON: ${{ secrets.GOAT_CONFIG_JSON }}
       - name: Build & publish installer
         working-directory: desktop
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # built-in keys come from repository secrets, so they never sit in your public code
-          GOAT_CONFIG: ${{ secrets.GOAT_CONFIG_JSON }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          if [ -n "$GOAT_CONFIG" ]; then echo "$GOAT_CONFIG" > config.json; fi
           npm ci
           npm version "$VERSION" --no-git-tag-version --allow-same-version
           npx electron-builder --win nsis --publish always \
@@ -44,6 +46,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Build in public cloud IDs (never secrets)
+        run: node scripts/inject-keys.js
+        env:
+          GOAT_CONFIG_JSON: ${{ secrets.GOAT_CONFIG_JSON }}
       - name: Build packages
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -86,6 +92,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.11.1
+      - name: Build in cloud keys
+        run: node scripts/inject-keys.js
+        env:
+          GOAT_CONFIG_JSON: ${{ secrets.GOAT_CONFIG_JSON }}
       - name: Restore signing key
         env:
           KEYSTORE_BASE64: ${{ secrets.GOAT_KEYSTORE_BASE64 }}

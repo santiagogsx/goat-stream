@@ -1,40 +1,99 @@
 <!doctype html>
-<!-- Goat Stream sign-in hand-off page.
-     Host this ONE file on any public https address (e.g. GitHub Pages) and register that address as a
-     redirect URL with Google and Dropbox. After you sign in on your phone, Google/Dropbox send the phone here,
-     and this page sends it straight on to Goat Stream on your PC at home. Nothing is stored or sent anywhere else. -->
+<!-- Goat Stream sign-in hand-off page (hosted on GitHub Pages). Two jobs:
+     1. TV sign-in: the TV's QR code opens this page with ?go=<provider>…; it sends the phone to Google / Microsoft /
+        Dropbox, and when they send the phone back here, it hands the one-time code straight to that TV over an
+        encrypted peer-to-peer link. The TV finishes the sign-in itself — no PC needed.
+     2. PC sign-in: sends the phone on to Goat Stream on the PC at home (older flow).
+     It stores nothing and sends nothing anywhere else. -->
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <title>Goat Stream</title>
+  <title>Goat Stream · Sign in</title>
+  <link rel="icon" href="../web/img/icon.png">
   <style>
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #070707; color: #fff;
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: radial-gradient(circle at 50% 0%, #2a1e06 0%, #050505 60%); color: #fff;
       font-family: "Segoe UI", Roboto, Arial, sans-serif; text-align: center; padding: 24px; box-sizing: border-box; }
-    h1 { color: #ffd978; font-size: 1.5rem; }
-    p { color: #bbb; line-height: 1.5; max-width: 26rem; margin: .6rem auto; }
+    img { width: 110px; border-radius: 22%; box-shadow: 0 0 40px rgba(230,179,74,.3); }
+    h1 { color: #ffd978; font-size: 1.6rem; margin: 1rem 0 .4rem; }
+    p { color: #bbb; line-height: 1.5; max-width: 26rem; margin: .6rem auto; font-size: 1.05rem; }
     .spin { width: 42px; height: 42px; margin: 24px auto; border-radius: 50%; border: 4px solid #333; border-top-color: #e6b34a; animation: s .9s linear infinite; }
+    .ok { font-size: 3.5rem; }
     @keyframes s { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
-  <div id="box"><h1>🐐 Goat Stream</h1><div class="spin"></div><p>Finishing sign-in on your PC…</p></div>
+  <div><img src="../web/img/icon.png" alt="Goat Stream"><div id="box"><div class="spin"></div><p>One moment…</p></div></div>
+  <script src="../web/js/peerjs.min.js"></script>
   <script>
     (function () {
+      var box = document.getElementById('box');
+      var show = function (html) { box.innerHTML = html; };
       var q = new URLSearchParams(location.search);
-      var parts = (q.get('state') || '').split('~');        // "<pc-address>~<provider>~<random>"
-      var host = parts[0], provider = parts[1];
-      // Only ever send the phone to a home-network address (192.168.x.x / 10.x.x.x / 172.16-31.x.x)
+      var here = location.origin + location.pathname;          // this page = the registered redirect address
+      var NAMES = { google: 'Google Drive', onedrive: 'OneDrive', dropbox: 'Dropbox' };
+
+      // ---- 1a. started from the TV's QR code: go sign in ----
+      var go = q.get('go');
+      if (go && NAMES[go]) {
+        var tv = q.get('tv') || '', cid = q.get('cid') || '', cc = q.get('cc') || '', n = q.get('n') || '';
+        if (!/^goatsignin-[a-z0-9]+$/.test(tv) || !cid || !cc) { show('<h1>This code is incomplete</h1><p>Scan the QR code on your TV again.</p>'); return; }
+        var state = 'tv~' + tv + '~' + go + '~' + n;
+        var auth;
+        if (go === 'google') {
+          auth = 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
+            client_id: cid, redirect_uri: here, response_type: 'code', scope: 'https://www.googleapis.com/auth/drive.readonly openid email',
+            access_type: 'offline', prompt: 'consent', code_challenge: cc, code_challenge_method: 'S256', state: state });
+        } else if (go === 'onedrive') {
+          auth = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?' + new URLSearchParams({
+            client_id: cid, redirect_uri: here, response_type: 'code', response_mode: 'query', prompt: 'select_account',
+            scope: 'offline_access Files.Read.All User.Read', code_challenge: cc, code_challenge_method: 'S256', state: state });
+        } else {
+          auth = 'https://www.dropbox.com/oauth2/authorize?' + new URLSearchParams({
+            client_id: cid, redirect_uri: here, response_type: 'code', token_access_type: 'offline',
+            code_challenge: cc, code_challenge_method: 'S256', state: state });
+        }
+        show('<div class="spin"></div><p>Opening ' + NAMES[go] + ' sign-in…</p>');
+        location.replace(auth);
+        return;
+      }
+
+      var stateIn = q.get('state') || '';
+      var parts = stateIn.split('~');
+
+      // ---- 1b. back from Google / Microsoft / Dropbox: hand the code to the TV ----
+      if (parts[0] === 'tv') {
+        var tvId = parts[1], provider = parts[2];
+        if (q.get('error')) { show('<h1>Sign-in cancelled</h1><p>Nothing was connected. You can scan the QR code on your TV again.</p>'); return; }
+        if (!/^goatsignin-[a-z0-9]+$/.test(tvId) || !q.get('code') || !window.Peer) { show('<h1>Something went wrong</h1><p>Scan the QR code on your TV again.</p>'); return; }
+        show('<div class="spin"></div><p>Sending your sign-in to the TV…</p>');
+        var peer = new Peer({ config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }] } });
+        var finished = false;
+        var fail = function (msg) { if (!finished) { finished = true; show('<h1>Couldn\'t reach your TV</h1><p>' + msg + '</p>'); } };
+        peer.on('open', function () {
+          var conn = peer.connect(tvId, { reliable: true });
+          conn.on('open', function () { conn.send({ t: 'code', code: q.get('code'), state: stateIn }); });
+          conn.on('data', function (d) {
+            if (d && d.t === 'done') { finished = true; show('<div class="ok">✓</div><h1>' + (NAMES[provider] || 'Cloud drive') + ' connected</h1><p>' + (d.name ? 'Signed in as <b>' + String(d.name).replace(/[<>&]/g, '') + '</b>. ' : '') + 'Look at your TV — your movies are loading. You can close this page.</p>'); }
+            if (d && d.t === 'error') fail(String(d.error || 'The TV couldn\'t finish signing in.').replace(/[<>&]/g, ''));
+          });
+        });
+        peer.on('error', function (e) { fail(e.type === 'peer-unavailable' ? 'The QR code on the TV has closed. Open “Add cloud drive” on the TV and scan again.' : 'Check your internet connection and scan again.'); });
+        setTimeout(function () { fail('It\'s taking too long. Make sure the TV still shows the QR code, then scan again.'); }, 45000);
+        return;
+      }
+
+      // ---- 2. PC sign-in: send the phone on to Goat Stream on the PC at home ----
+      var host = parts[0], prov = parts[1];
       var m = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}:\d{2,5}$/.exec(host || '');
       var home = m && (m[1] === '10' || (m[1] === '192' && m[2] === '168') || (m[1] === '172' && +m[2] >= 16 && +m[2] <= 31));
-      if (home && (provider === 'google' || provider === 'dropbox' || provider === 'onedrive')) {
-        location.replace('http://' + host + '/oauth/' + provider + '/callback' + location.search);
-        setTimeout(function () {
-          document.getElementById('box').innerHTML = '<h1>Almost there</h1><p>Your phone couldn\'t reach your PC. Make sure your phone is on the same Wi-Fi as your PC and Goat Stream is open, then scan the QR code again.</p>';
-        }, 8000);
+      if (home && NAMES[prov]) {
+        show('<div class="spin"></div><p>Finishing sign-in on your PC…</p>');
+        location.replace('http://' + host + '/oauth/' + prov + '/callback' + location.search);
+        setTimeout(function () { show('<h1>Almost there</h1><p>Your phone couldn\'t reach your PC. Make sure your phone is on the same Wi-Fi as your PC and Goat Stream is open, then scan the QR code again.</p>'); }, 8000);
       } else {
-        document.getElementById('box').innerHTML = '<h1>Nothing to do here</h1><p>This page finishes Goat Stream sign-ins. Start from the QR code in Goat Stream.</p>';
+        show('<h1>Nothing to do here</h1><p>This page finishes Goat Stream sign-ins. Start from the QR code in Goat Stream.</p>');
       }
     })();
   </script>
