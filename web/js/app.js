@@ -1,10 +1,43 @@
 /* Goat Stream — one UI shared by:
  *   - the Windows app (Electron window, served by the PC server)          -> MODE 'desktop'
  *   - the Android TV app (bundled in a WebView, native 4K player)         -> MODE 'tv'
+ *   - the Xbox app (bundled in WebView2, native 4K/HDR player — xbox/)    -> MODE 'xbox'
+ *   - Samsung / LG TV apps (bundled on the TV)                            -> MODE 'tvweb'
  *   - any other TV / phone browser on the home network (served by the PC) -> MODE 'browser' */
 (() => {
 'use strict';
 
+// Xbox app: the native side (xbox/GoatStream) talks through chrome.webview messages instead of the Android TV app's
+// GoatTV object, so give it the same GoatTV bridge here — then the Xbox works exactly like the Android TV app
+// (networking without browser limits, finding the PC, the native player, offline library).
+const XBOX = !!(window.__goatXbox && window.chrome && window.chrome.webview);
+if (XBOX && !window.GoatTV) {
+  const wv = window.chrome.webview;
+  const send = m => wv.postMessage(JSON.stringify(m));
+  wv.addEventListener('message', e => {
+    let m = e.data;
+    if (typeof m === 'string') { try { m = JSON.parse(m); } catch (x) { return; } }
+    if (!m) return;
+    if (m.t === 'http') { if (window.__goatHttp) window.__goatHttp(m.id, m.status, m.text); }
+    else if (m.t === 'discovered') { if (window.goatDiscovered) window.goatDiscovered(JSON.stringify(m.list || [])); }
+    else if (m.t === 'playerClosed') { if (window.goatPlayerClosed) window.goatPlayerClosed(JSON.stringify(m.result || {})); }
+    else if (m.t === 'resume') { if (window.goatResume) window.goatResume(); }
+    else if (m.t === 'back') { if (window.__goatXboxBack) window.__goatXboxBack(); }
+    else if (m.t === 'toast') { if (window.__goatToast) window.__goatToast(m.text); }
+  });
+  window.GoatTV = {
+    http: (id, method, url, headers, body) => send({ t: 'http', id, method, url, headers: JSON.parse(headers || '{}'), body: body || '' }),
+    discover: () => send({ t: 'discover' }),
+    play: json => send({ t: 'play', req: JSON.parse(json) }),
+    deviceName: () => window.__goatXbox.device || 'Xbox',
+    appVersion: () => window.__goatXbox.version || '0',
+    installedApps: () => 'null',                  // unknown on Xbox: every streaming app tile just opens the Store
+    launchApp: (pkg, name) => { send({ t: 'launch', pkg, name: name || '' }); return true; },
+    installUpdate: () => {},                      // the Microsoft Store updates the Xbox app
+  };
+  // controller buttons arrive as key presses, not as a mouse pointer
+  try { if (typeof navigator.gamepadInputEmulation === 'string') navigator.gamepadInputEmulation = 'keyboard'; } catch (e) { /* not there */ }
+}
 const TV = !!window.GoatTV;
 const DESKTOP = !!window.goatDesktop;
 // LG webOS: a tiny stand-in for LG's webOSTV.js (system calls + leaving the app) so we don't need to ship it
@@ -24,7 +57,7 @@ if (!window.webOS && window.PalmServiceBridge) {
 const TVWEB = !TV && !DESKTOP && ((location.protocol !== 'http:' && location.protocol !== 'https:'
   && (!!window.tizen || !!window.webOS || /Tizen|Web0S|webOS/i.test(navigator.userAgent))) || window.__goatForceTvWeb === true);
 const APP_TV = TV || TVWEB;              // an installed TV app that remembers which PC it's linked to
-const MODE = TV ? 'tv' : DESKTOP ? 'desktop' : TVWEB ? 'tvweb' : 'browser';
+const MODE = XBOX ? 'xbox' : TV ? 'tv' : DESKTOP ? 'desktop' : TVWEB ? 'tvweb' : 'browser';
 const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
 if (APP_TV) document.documentElement.classList.add('tv');
 if (MODE === 'browser' && !matchMedia('(hover: hover)').matches) document.documentElement.classList.add('remote');
@@ -150,7 +183,12 @@ function srvUrl(path, params) {
   const qs = q.toString();
   return conn.base + path + (qs ? (path.includes('?') ? '&' : '?') + qs : '');
 }
-function imgUrl(u) { return !u ? '' : u.startsWith('/') ? srvUrl(u) : u; }
+function imgUrl(u) {
+  if (!u) return '';
+  if (u.startsWith('/')) u = srvUrl(u);
+  // Xbox: the page is https, so plain-http covers from the PC come through the app (xbox/GoatStream/MainPage.xaml.cs)
+  return XBOX && u.startsWith('http://') ? 'https://pc.goatstream.example/' + u.slice(7) : u;
+}
 
 // ---------- state ----------
 const S = {
@@ -746,10 +784,15 @@ async function playTV(it, startSec, mode) {
       } else throw new Error('This cloud account isn\'t linked to the TV yet. Turn on your PC once to sync it.');
     }
   } catch (e) { toast(e.message || 'Couldn\'t start playback'); return; }
+  // Xbox's player can't send sign-in headers, so Google's token rides in the address (like Samsung / LG)
+  if (XBOX && headers && headers.Authorization) {
+    url += (url.includes('?') ? '&' : '?') + 'access_token=' + encodeURIComponent(headers.Authorization.replace(/^Bearer /, ''));
+    headers = {};
+  }
   const t = titleOfItem(it);
   tvPlaying = { it, mode };
   window.GoatTV.play(JSON.stringify({
-    id: it.id, url, headers, startMs: Math.round(startSec * 1000),
+    id: it.id, url, headers, startMs: Math.round(startSec * 1000), hdr: !!it.hdr && mode !== 'transcode',
     title: t.name, subtitle: it.show ? `S${it.season}:E${it.episode}${it.epName ? ' · ' + it.epName : ''}` : (it.quality === '4K' ? '4K Ultra HD' : ''),
     live: mode !== 'direct',
     offsetMs: mode !== 'direct' ? Math.round(startSec * 1000) : 0,
@@ -1317,7 +1360,21 @@ window.addEventListener('message', e => {
 // ---------- Samsung / LG remotes ----------
 // Their remotes send numeric key codes; turn them into the same names the rest of the app uses.
 const TV_KEYS = { 10009: 'GoBack', 461: 'GoBack', 415: 'MediaPlay', 19: 'MediaPause', 10252: 'MediaPlayPause', 417: 'MediaFastForward', 412: 'MediaRewind', 413: 'MediaStop' };
-const keyName = e => TV_KEYS[e.keyCode] || e.key;
+// Xbox controller: the console sends its buttons as key codes. D-pad and left stick move like arrows.
+const XBOX_PAD = { 195: 'PadA', 196: 'PadB', 199: 'PadRB', 200: 'PadLB', 203: 'ArrowUp', 204: 'ArrowDown', 205: 'ArrowLeft', 206: 'ArrowRight',
+  207: 'PadMenu', 208: 'PadView', 211: 'ArrowUp', 212: 'ArrowDown', 213: 'ArrowRight', 214: 'ArrowLeft' };
+const keyName = e => TV_KEYS[e.keyCode] || (XBOX && XBOX_PAD[e.keyCode]) || e.key;
+let xboxBackAt = 0;
+function xboxButton(k, target) {
+  if (k === 'PadA') { if (target && target !== document.body && target.click) target.click(); else Nav.move('down'); }
+  else if (k === 'PadB') { xboxBackAt = Date.now(); window.goatBack(); }
+  else if ($('.onboard')) return;                                          // setup screen: only A / B / arrows
+  else if (k === 'PadLB' || k === 'PadRB') { for (let i = 0; i < 4; i++) Nav.move(k === 'PadLB' ? 'left' : 'right'); }   // jump along a row
+  else if (k === 'PadMenu') { closeAll(); go('settings'); }
+  else if (k === 'PadView') { closeAll(); go('search'); }
+}
+// The console's own Back (B) from the native side — skipped when the page already handled that same press
+window.__goatXboxBack = () => { if (Date.now() - xboxBackAt > 400) window.goatBack(); };
 function tvwebExit() {
   try { if (window.tizen) tizen.application.getCurrentApplication().exit(); else if (window.webOS) webOS.platformBack(); } catch (e) { /* stay */ }
 }
@@ -1406,9 +1463,17 @@ document.addEventListener('keydown', e => {
   // Samsung / LG Back on the home screen leaves the app
   if (TVWEB && k === 'GoBack') { e.preventDefault(); if (!window.goatBack()) tvwebExit(); return; }
   const dirs = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
-  const inInput = e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT';
+  const inInput = e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA';
+  const pad = XBOX && e.keyCode >= 195 && e.keyCode <= 218;
+  if (pad && /^Pad/.test(k)) {
+    if (k === 'PadA' && inInput) return;          // A on a text box: let the Xbox open its on-screen keyboard
+    e.preventDefault();
+    document.documentElement.classList.add('remote');
+    xboxButton(k, e.target);
+    return;
+  }
   if (dirs[k]) {
-    if (inInput && (k === 'ArrowLeft' || k === 'ArrowRight') && e.target.type !== 'range') return;
+    if (inInput && !pad && (k === 'ArrowLeft' || k === 'ArrowRight') && e.target.type !== 'range') return;
     e.preventDefault();
     document.documentElement.classList.add('remote');
     // holding a button down: steady pace instead of a pile-up of scrolls
@@ -1445,7 +1510,8 @@ const actions = {
   scroll: el => { const tr = el.parentElement.querySelector('.track'); tr.scrollBy({ left: +el.dataset.dir * tr.clientWidth * 0.85, behavior: 'smooth' }); },
   refresh: () => loadLibrary(),
   launchApp: el => {
-    if (TV) { if (!window.GoatTV.launchApp(el.dataset.pkg)) toast('Opening the Play Store…'); }
+    if (XBOX) { window.GoatTV.launchApp(el.dataset.pkg, el.textContent.trim()); toast('Opening the Microsoft Store…'); }
+    else if (TV) { if (!window.GoatTV.launchApp(el.dataset.pkg)) toast('Opening the Play Store…'); }
     else if (TVWEB) tvwebLaunch(el.dataset.pkg, el.textContent.trim());
     else if (DESKTOP) window.goatDesktop.openExternal(el.dataset.pcurl || el.dataset.url);
     else window.open(el.dataset.url, '_blank');
@@ -2117,6 +2183,7 @@ const newer = (a, b) => {                       // is version a newer than b?
 
 // Android TV: look for a newer APK in the GitHub releases (twice a day at most, or when asked)
 async function tvCheckUpdate(manual) {
+  if (XBOX) { if (manual) toast('The Microsoft Store keeps Goat Stream up to date on your Xbox.'); return; }
   if (!TV || !GH_REPO) { if (manual) toast('Updates aren\'t set up for this TV app yet.'); return; }
   if (!manual && Date.now() - store.get('updChecked', 0) < 12 * 3600e3) return;
   store.set('updChecked', Date.now());
@@ -2178,6 +2245,10 @@ function updatesHTML(version) {
         <button class="btn btn-dark btn-small focusable" data-act="checkUpdates">Check now</button>
         ${S.update && S.update.state === 'ready' ? '<button class="btn btn-play btn-small focusable" data-act="installUpdate">Restart & update</button>' : ''}</div>
       <p style="color:#999;font-size:.85rem">New versions download in the background and install when Goat Stream restarts.</p></div>`;
+  }
+  if (XBOX) {
+    return `<div class="sec"><h2>⬆️ Updates</h2>
+      <div class="li"><div class="grow"><b>Goat Stream ${esc(window.GoatTV.appVersion())}</b><small>The Microsoft Store updates Goat Stream on your Xbox automatically.</small></div></div></div>`;
   }
   if (TV) {
     return `<div class="sec"><h2>⬆️ Updates</h2>

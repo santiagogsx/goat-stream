@@ -7,7 +7,8 @@ Your own Netflix-style movie app. Movies on your **PC**, **Google Drive** and **
 goat-stream/
 ├── web/          The app's look & feel (shared by every screen)
 ├── desktop/      Windows app + the media server that runs in the tray
-└── android-tv/   Android TV app (native 4K player)
+├── android-tv/   Android TV app (native 4K player)
+└── xbox/         Xbox app for the Microsoft Store (native 4K/HDR player)
 ```
 
 ---
@@ -166,6 +167,51 @@ All three find your PC by themselves (Roku) or by scanning your home network (Sa
 ### Roku
 1. With the Roku remote press **Home ×3, Up ×2, Right, Left, Right, Left, Right** → **Enable installer** and set a password (the Roku restarts).
 2. On the PC open `http://ROKU-IP` → sign in as `rokudev` with that password → **Upload** `GoatStream-Roku.zip` → **Install**.
+
+## 🎮 Xbox app (Microsoft Store)
+
+The Xbox app is in `xbox/`. It is a small Xbox app with **the same Goat Stream screens** inside (Microsoft's Edge "WebView2", which Microsoft offers for Xbox media apps). Movies play in the **Xbox's own video player**: 4K, HDR10, MP4 and MKV, H.264 and HEVC, and Dolby/DTS sound sent out the way your Xbox audio settings say. It works like the Android TV app:
+
+- finds your PC by itself, then you click **Allow** on the PC;
+- the controller does everything: **D-pad / left stick** move, **A** selects, **B** goes back, **LB / RB** jump along a row, **☰ Menu** opens Settings, **⧉ View** opens Search;
+- while a movie plays: **LB** goes back 10 s, **RB** skips 30 s, **X** pauses or plays, **B** stops;
+- **Use without a PC** and phone sign-in to Google Drive / OneDrive / Dropbox work as on the other TVs;
+- the Microsoft Store keeps it up to date (no "Update now" pop-up like Android).
+
+**Good to know:** to get **24 Hz** (smooth films) and **HDR**, the Xbox's *Settings → General → TV & display options → Video modes* must allow **24Hz** and **HDR10**. Dolby Vision files play in their HDR10 form. If a file won't play, the Xbox asks your PC to convert it, like the other TVs do.
+
+### Try it on your own Xbox first (Developer Mode, free)
+1. On the Xbox, install the free **Xbox Dev Mode** app from the Store, open it and follow the steps. The first time you need a free sign-in at <https://partner.microsoft.com/dashboard> (see "Publish" step 1 below), where you type the code the Xbox shows. The Xbox restarts into **Dev Home**. (Your games and normal apps don't run in Dev Mode. Switch back to *Retail* in Dev Home whenever you like.)
+2. In Dev Home, turn on **Remote Access** (Xbox Device Portal) and set a username and password. Note the address it shows, like `https://192.168.1.30:11443`.
+3. On the PC, download **`GoatStream-Xbox-test.zip`** from the latest GitHub release and unzip it.
+4. Open the Xbox's address in a PC web browser (accept the security warning) → **Add** → choose the `.msix` file → tick **"I want to specify optional packages"** → add every file in the `Dependencies\x64` folder → **Start**.
+5. Goat Stream appears in Dev Home's app list. Highlight it, press **View** (⧉) → *View details* → set **App type: App** (not Game), then open it.
+
+<details><summary>Or build it yourself with Visual Studio</summary>
+
+Install **Visual Studio 2022** (free Community edition) with the **Universal Windows Platform development** workload, open `xbox/GoatStream.Xbox.sln`, choose **Release | x64**, and set *Debug → Remote Machine* to the Xbox's IP with *Authentication: Universal (Unencrypted)*. Press F5 and type the PIN from Dev Home. Pressing F5 with *Local Machine* runs it on the PC.
+</details>
+
+### Publish it on the Xbox Store (so anyone can download it)
+1. **Developer account (free for one person):** go to <https://storedeveloper.microsoft.com> → sign up as an **Individual** with your Microsoft account → confirm your ID (photo of your ID + a selfie). Microsoft stopped charging individuals in Sept 2025. A *company* account costs a one-time $99.
+2. **Reserve the name:** Partner Center → **Apps and games → New product → App** → name it **Goat Stream** (pick another name if it's taken).
+3. **Copy the app's identity into GitHub:** in the new product open **Product management → Product identity**. In GitHub → repository **Settings → Secrets and variables → Actions → *Variables*** add:
+   - `XBOX_IDENTITY_NAME` = *Package/Identity/Name* (looks like `12345Santiago.GoatStream`)
+   - `XBOX_PUBLISHER` = *Package/Identity/Publisher* (looks like `CN=1A2B3C4D-…`)
+   - `XBOX_PUBLISHER_NAME` = *Package/Properties/PublisherDisplayName* (your publisher name)
+
+   These aren't secret. The next release then also contains **`GoatStream-Xbox.msixupload`**, the file the Store wants.
+4. **Start a submission** (Partner Center → Goat Stream → *Start your submission*):
+   - **Pricing and availability:** Free; pick the countries.
+   - **Properties:** category *Entertainment*; under device families tick **Xbox** only.
+   - **Age ratings:** fill in the free questionnaire (IARC). It's a video player: no violence, no in-app purchases, users can't chat (Watch Together chat → answer yes to "users can interact/share content" if asked). You'll most likely get "Everyone / 3+".
+   - **Packages:** upload `GoatStream-Xbox.msixupload`.
+   - **Store listing:** description (e.g. *"Watch your own movies from your PC, Google Drive, OneDrive and Dropbox on your Xbox. Created by Santiago."*), at least one **screenshot** of the app on Xbox (1920×1080; in Dev Mode press the Xbox button → *Capture*), plus the ready-made pictures in `xbox/store-art/`: `hero-1920x1080.png` (Super hero art), `box-art-1080x1080.png` (box art), `poster-720x1080.png` (poster art), `store-logo-300x300.png`.
+   - **Privacy policy link:** required because the app uses the internet. A short page on GitHub Pages is fine ("Goat Stream collects nothing; movies stay between your devices; sign-ins go straight to Google/Microsoft/Dropbox").
+   - **Submission options → restricted capabilities:** the app asks for `hevcPlayback`. Explain: *"Video player for the user's own 4K HEVC movies on Xbox."*
+   - **Notes for certification:** tell the testers they need Goat Stream for Windows on a PC on the same network, or they can use **Use without a PC** with a cloud drive. Add a link to the Windows download.
+5. **Submit.** Microsoft tests it on a real Xbox (usually a few days). If they find a problem, they send a report. Fix it and submit again.
+6. **Updates later:** each new GitHub release makes a new `.msixupload` → Partner Center → *Update* → upload → submit. The Xbox updates people's copies by itself.
 
 ## 5. Any other TV (Fire TV browser, phones, older TVs…)
 

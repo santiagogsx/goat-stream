@@ -1,0 +1,91 @@
+# Builds the Xbox app (xbox/, UWP + WebView2).
+# - By hand: GitHub -> Actions -> "Xbox build" -> Run workflow. Makes a test package for Developer Mode,
+#   downloadable from that run's page ("Artifacts"). Nothing is released.
+# - On every release: release.yml runs this too and attaches the files to the release.
+name: Xbox build
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      release:
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  xbox:
+    runs-on: windows-2022   # has Visual Studio 2022 with the Universal Windows Platform tools
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build in public cloud IDs (never secrets)
+        run: node scripts/inject-keys.js
+        env:
+          GOAT_CONFIG_JSON: ${{ secrets.GOAT_CONFIG_JSON }}
+      # Store identity comes from Partner Center (Product identity page). These are public values, so they are
+      # repository *variables* (Settings -> Secrets and variables -> Actions -> Variables), not secrets.
+      - name: Version & Store identity
+        shell: pwsh
+        env:
+          IS_RELEASE: ${{ inputs.release }}
+          XBOX_IDENTITY_NAME: ${{ vars.XBOX_IDENTITY_NAME }}
+          XBOX_PUBLISHER: ${{ vars.XBOX_PUBLISHER }}
+          XBOX_PUBLISHER_NAME: ${{ vars.XBOX_PUBLISHER_NAME }}
+        run: |
+          $file = 'xbox/GoatStream/Package.appxmanifest'
+          [xml]$m = Get-Content $file -Raw
+          if ($env:IS_RELEASE -eq 'true') { $m.Package.Identity.Version = "$($env:GITHUB_REF_NAME.TrimStart('v')).0" }
+          if ($env:XBOX_IDENTITY_NAME) { $m.Package.Identity.Name = $env:XBOX_IDENTITY_NAME }
+          if ($env:XBOX_PUBLISHER) { $m.Package.Identity.Publisher = $env:XBOX_PUBLISHER }
+          if ($env:XBOX_PUBLISHER_NAME) { $m.Package.Properties.PublisherDisplayName = $env:XBOX_PUBLISHER_NAME }
+          $m.Save((Resolve-Path $file).Path)
+          "PUBLISHER=$($m.Package.Identity.Publisher)" >> $env:GITHUB_ENV
+          if ($env:XBOX_IDENTITY_NAME) { "STORE_READY=1" >> $env:GITHUB_ENV }
+          else { "::warning::XBOX_IDENTITY_NAME variable not set - only the Developer Mode test package is built. See README (Xbox)." }
+      - name: Build test package (Developer Mode)
+        shell: pwsh
+        run: |
+          # a throw-away signing certificate made fresh for every build: test packages must be signed, but the Store
+          # re-signs real downloads itself, so nothing secret is needed or kept
+          $cert = New-SelfSignedCertificate -Type Custom -Subject $env:PUBLISHER -KeyUsage DigitalSignature -FriendlyName 'Goat Stream test' `
+            -CertStoreLocation Cert:\CurrentUser\My -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}')
+          $pw = [guid]::NewGuid().ToString()
+          $pfx = "$env:RUNNER_TEMP\goat-test.pfx"
+          Export-PfxCertificate -Cert $cert -FilePath $pfx -Password (ConvertTo-SecureString $pw -AsPlainText -Force) | Out-Null
+          msbuild xbox/GoatStream.Xbox.sln /restore /m /p:Configuration=Release /p:Platform=x64 `
+            /p:UapAppxPackageBuildMode=SideloadOnly /p:AppxBundle=Never /p:AppxPackageSigningEnabled=true `
+            /p:PackageCertificateKeyFile=$pfx /p:PackageCertificatePassword=$pw /p:AppxPackageDir=$env:RUNNER_TEMP/xbox-test/
+          $code = $LASTEXITCODE
+          Remove-Item $pfx
+          if ($code) { exit $code }
+          $dir = Get-ChildItem "$env:RUNNER_TEMP\xbox-test" -Directory | Select-Object -First 1
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\out" | Out-Null
+          Compress-Archive -Path "$($dir.FullName)\*" -DestinationPath "$env:RUNNER_TEMP\out\GoatStream-Xbox-test.zip"
+      - name: Build Store upload file
+        if: env.STORE_READY == '1'
+        shell: pwsh
+        run: |
+          msbuild xbox/GoatStream.Xbox.sln /m /p:Configuration=Release /p:Platform=x64 `
+            /p:UapAppxPackageBuildMode=StoreUpload /p:AppxBundle=Never /p:AppxPackageSigningEnabled=false /p:AppxPackageDir=$env:RUNNER_TEMP/xbox-store/
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Get-ChildItem "$env:RUNNER_TEMP\xbox-store" -Filter *.msixupload | Select-Object -First 1 |
+            Copy-Item -Destination "$env:RUNNER_TEMP\out\GoatStream-Xbox.msixupload"
+      - name: Keep the files on this run's page
+        uses: actions/upload-artifact@v4
+        with:
+          name: GoatStream-Xbox
+          path: ${{ runner.temp }}/out/
+      - name: Attach to the release
+        if: inputs.release
+        uses: softprops/action-gh-release@v2
+        with:
+          fail_on_unmatched_files: false
+          files: |
+            ${{ runner.temp }}/out/GoatStream-Xbox-test.zip
+            ${{ runner.temp }}/out/GoatStream-Xbox.msixupload

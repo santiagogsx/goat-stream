@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Goat Stream for Xbox (UWP + WebView2). Created by Santiago.
+     Identity Name / Publisher: replace with the values Partner Center gives you (Product management -> Product identity)
+     before uploading to the Store. The release build fills them in from the GitHub repository variables
+     XBOX_IDENTITY_NAME, XBOX_PUBLISHER and XBOX_PUBLISHER_NAME (public values, not secrets). -->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap mp rescap">
+
+  <Identity Name="Santiago.GoatStream" Publisher="CN=Santiago" Version="1.0.3.0" />
+
+  <mp:PhoneIdentity PhoneProductId="6b1f8a52-4c3e-4f7a-9d0e-2a7c5e1b9f40" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
+
+  <Properties>
+    <DisplayName>Goat Stream</DisplayName>
+    <PublisherDisplayName>Santiago</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <!-- Universal: runs on Xbox (and on a Windows PC for testing). In Partner Center tick only "Xbox" under device families. -->
+    <TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.19041.0" MaxVersionTested="10.0.22621.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="x-generate"/>
+  </Resources>
+
+  <Applications>
+    <Application Id="App" Executable="$targetnametoken$.exe" EntryPoint="GoatStream.App">
+      <uap:VisualElements
+        DisplayName="Goat Stream"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png"
+        Description="Your movies from your PC, Google Drive, OneDrive and Dropbox. Created by Santiago."
+        BackgroundColor="#000000">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" Square310x310Logo="Assets\Square310x310Logo.png" ShortName="Goat Stream">
+          <uap:ShowNameOnTiles>
+            <uap:ShowOn Tile="square150x150Logo"/>
+          </uap:ShowNameOnTiles>
+        </uap:DefaultTile>
+        <uap:SplashScreen Image="Assets\SplashScreen.png" BackgroundColor="#000000"/>
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <!-- internet: covers, cloud drives, Watch Together -->
+    <Capability Name="internetClient" />
+    <!-- home network: talk to Goat Stream on the PC and find it (UDP broadcast) -->
+    <Capability Name="privateNetworkClientServer" />
+    <!-- Xbox: lets a media app use the extra graphics memory needed for 4K / HEVC video.
+         Restricted capability: Partner Center asks why — answer "video player app that plays the user's own 4K HEVC movies". -->
+    <rescap:Capability Name="hevcPlayback" />
+  </Capabilities>
+</Package>

@@ -2,7 +2,8 @@
 #   git tag v1.1.0 && git push origin v1.1.0
 # - Windows installer (+ latest.yml, which the PC app's auto-updater reads)
 # - Android TV APK (the TV app's updater downloads it)
-# Both land on the GitHub release page, which is also your public download link.
+# - LG / Samsung / Roku packages, and the Xbox test package + Microsoft Store upload file
+# They all land on the GitHub release page, which is also your public download link.
 name: Release
 
 on:
@@ -79,6 +80,13 @@ jobs:
             ${{ runner.temp }}/out/GoatStream-LG.ipk
             ${{ runner.temp }}/out/GoatStream-Samsung-project.zip
             ${{ runner.temp }}/out/GoatStream-Roku.zip
+
+  xbox:
+    needs: windows          # Xbox app: test package for Developer Mode + Store upload file (steps live in xbox.yml)
+    uses: ./.github/workflows/xbox.yml
+    with:
+      release: true
+    secrets: inherit
 
   android-tv:
     needs: windows          # the Windows job creates the release page; the APK is added to it
