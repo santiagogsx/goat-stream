@@ -183,7 +183,7 @@ The Xbox app is in `xbox/`. It is a small Xbox app with **the same Goat Stream s
 ### Try it on your own Xbox first (Developer Mode, free)
 1. On the Xbox, install the free **Xbox Dev Mode** app from the Store, open it and follow the steps. The first time you need a free sign-in at <https://partner.microsoft.com/dashboard> (see "Publish" step 1 below), where you type the code the Xbox shows. The Xbox restarts into **Dev Home**. (Your games and normal apps don't run in Dev Mode. Switch back to *Retail* in Dev Home whenever you like.)
 2. In Dev Home, turn on **Remote Access** (Xbox Device Portal) and set a username and password. Note the address it shows, like `https://192.168.1.30:11443`.
-3. On the PC, download **`GoatStream-Xbox-test.zip`** from the latest GitHub release and unzip it.
+3. On the PC, download **`GoatStream-Xbox-test.zip`** from the latest GitHub release and unzip it. (Between releases: GitHub → **Actions → Xbox build → Run workflow**, then download **GoatStream-Xbox** under *Artifacts* on that run's page. You must be signed in to GitHub.)
 4. Open the Xbox's address in a PC web browser (accept the security warning) → **Add** → choose the `.msix` file → tick **"I want to specify optional packages"** → add every file in the `Dependencies\x64` folder → **Start**.
 5. Goat Stream appears in Dev Home's app list. Highlight it, press **View** (⧉) → *View details* → set **App type: App** (not Game), then open it.
 
