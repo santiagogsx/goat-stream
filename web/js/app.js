@@ -423,9 +423,10 @@ function emptyHTML() {
   // TV on its own: straight to "add a cloud drive"
   if (APP_TV && !conn.base) {
     return `<div class="empty" style="padding-top:8rem"><h2>Let's add your movies</h2>
-      <p>Connect Google Drive, OneDrive or Dropbox — scan a QR code with your phone, sign in, done.</p>
-      <div class="btns"><button class="btn btn-play focusable" data-act="addCloud">☁️ Add cloud drive</button>
-      <button class="btn btn-dark focusable" data-act="linkPc">Link a PC instead</button></div></div>`;
+      <p>${canCloud ? 'Connect Google Drive, OneDrive or Dropbox — scan a QR code with your phone, sign in, done. ' : ''}Got a friend hosting a movie night? Join their Watch Together party with the code on their screen.</p>
+      <div class="btns">${canCloud ? '<button class="btn btn-play focusable" data-act="addCloud">☁️ Add cloud drive</button>' : ''}
+      <button class="btn ${canCloud ? 'btn-dark' : 'btn-play'} focusable" data-act="joinTogether">👥 Join Watch Together</button>
+      <button class="btn btn-dark focusable" data-act="linkPc">Link a PC</button></div></div>`;
   }
   return `<div class="empty" style="padding-top:8rem"><h2>No movies yet</h2>
     <p>${S.online ? 'Add Google Drive, OneDrive or Dropbox right here with your phone, or add movie folders in Goat Stream on your PC. Everything shows up here automatically.' : 'Your PC is offline. Turn on your PC (Goat Stream runs in the system tray) and try again.'}</p>
@@ -1979,7 +1980,15 @@ function onboarding() {
     <h1>Welcome to Goat Stream</h1>
     <div id="ob-step"></div></div>`;
   document.body.appendChild(el);
-  if (APP_TV) obSearch(); else obPair(location.origin);
+  if (APP_TV) obChoose(); else obPair(location.origin);
+}
+// TV apps: a PC is optional — it adds the movies stored on it; without one, cloud drives and Watch Together still work
+function obChoose() {
+  obStep(`<p>Where are your movies?</p>
+    <div class="ob-choices">
+      <button class="ob-choice focusable" data-ob="findpc"><b>💻 On my PC</b><small>Link Goat Stream on your Windows PC to watch the movies stored on it. You can add cloud drives too.</small></button>
+      <button class="ob-choice focusable" data-ob="standalone"><b>☁️ No PC needed</b><small>${anyDirect() ? 'Stream from Google Drive, OneDrive or Dropbox and' : 'Use Goat Stream on its own and'} watch with friends in Watch Together parties. You can link a PC later in Settings.</small></button>
+    </div>`);
 }
 function obStep(html) {
   const box = $('#ob-step');
@@ -2014,12 +2023,12 @@ function pcDownloadHTML() {
 function standaloneOfferHTML() {
   return `<div class="getpc" style="justify-content:space-between">
     <div><b class="getpc-title">☁️ No PC? No problem.</b>
-      <p>Use Goat Stream on this TV by itself — just sign in to Google Drive, OneDrive or Dropbox with your phone.</p></div>
+      <p>Use Goat Stream on this ${XBOX ? 'Xbox' : 'TV'} by itself — ${anyDirect() ? 'sign in to Google Drive, OneDrive or Dropbox with your phone, and ' : ''}join Watch Together parties with friends.</p></div>
     <button class="btn btn-play focusable" data-ob="standalone" style="flex:none">Use without a PC</button></div>`;
 }
 function obSearch() {
   obStep(`<p>Looking for Goat Stream on your PC…</p><div class="spinner" style="margin:2rem auto"></div>
-    ${anyDirect() ? standaloneOfferHTML() : ''}`);
+    ${standaloneOfferHTML()}`);
   window.goatDiscovered = json => {
     let list = [];
     try { list = JSON.parse(json); } catch (e) { /* none */ }
@@ -2028,7 +2037,7 @@ function obSearch() {
       <div class="server-list">${list.map(s => `<button class="server focusable" data-ob="pick" data-url="http://${esc(s.host)}:${s.port}" data-name="${esc(s.name)}">${I.tv}<div><b>${esc(s.name)}</b><small>${esc(s.host)}</small></div></button>`).join('')}</div>
       <div class="btns" style="justify-content:center"><button class="btn btn-play focusable" data-ob="retry">Search again</button>
       <button class="btn btn-dark focusable" data-ob="manual">Enter PC address</button></div>
-      ${anyDirect() ? standaloneOfferHTML() : ''}
+      ${standaloneOfferHTML()}
       ${list.length ? '' : pcDownloadHTML()}`);
   };
   if (TV) window.GoatTV.discover();
@@ -2131,10 +2140,11 @@ document.addEventListener('click', e => {
     const ob = $('.onboard');
     if (ob) ob.remove();
     S.page = 'home';
-    loadLibrary(true).then(() => { if (!store.get('accounts', []).some(x => x.tvOnly)) openCloudPicker(); });
+    loadLibrary(true).then(() => { if (anyDirect() && !store.get('accounts', []).some(x => x.tvOnly)) openCloudPicker(); });
     return;
   }
-  if (a === 'retry') { obSearch.retried = true; obSearch(); }
+  if (a === 'findpc') obSearch();
+  else if (a === 'retry') { obSearch.retried = true; obSearch(); }
   else if (a === 'pick') obPair(b.dataset.url, b.dataset.name);
   else if (a === 'again') obPair(b.dataset.url || (APP_TV ? conn.base : location.origin));
   else if (a === 'manual') {
