@@ -67,7 +67,12 @@ jobs:
         run: |
           gradle :app:assembleRelease -PversionName="${GITHUB_REF_NAME#v}"
           cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/GoatStream-TV-${GITHUB_REF_NAME}.apk"
+          # same file under a fixed name, so this link always gets the newest version:
+          # https://github.com/<you>/goat-stream/releases/latest/download/GoatStream-TV.apk
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/GoatStream-TV.apk"
       - name: Attach the APK to the release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ runner.temp }}/GoatStream-TV-${{ github.ref_name }}.apk
+          files: |
+            ${{ runner.temp }}/GoatStream-TV-${{ github.ref_name }}.apk
+            ${{ runner.temp }}/GoatStream-TV.apk
