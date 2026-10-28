@@ -1,0 +1,14 @@
+<!doctype html>
+<!-- Short public link for Watch Together invites: …/goat-stream/watch/#goatstream-xxxx → the friend page in web/ -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Watch Together · Goat Stream</title>
+  <script>location.replace('../web/watch.html' + location.search + location.hash);</script>
+</head>
+<body style="background:#000;color:#ccc;font-family:Segoe UI,Arial,sans-serif;text-align:center;padding-top:40vh">
+  Opening Watch Together… <a style="color:#ffd978" id="a" href="../web/watch.html">continue</a>
+  <script>document.getElementById('a').href += location.hash;</script>
+</body>
+</html>

@@ -63,6 +63,7 @@ const I = {
   next: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M6 5v14l9-7zm10 0h2v14h-2z"/></svg>',
   ext: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M14 3h7v7h-2V6.4l-9.3 9.3-1.4-1.4L17.6 5H14zM5 5h6v2H5v12h12v-6h2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/></svg>',
   tv: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M3 5h18v12H3zm2 2v8h14V7zm3 12h8v2H8z"/></svg>',
+  people: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-3.3 0-7 1.7-7 4v2h14v-2c0-2.3-3.7-4-7-4zm7.5-2.2a3.3 3.3 0 1 0 0-6.6 3.3 3.3 0 0 1 0 6.6zM17 13c1.1.9 1.9 2.1 1.9 3.9V19H22v-2c0-1.9-2.4-3.4-5-4z"/></svg>',
 };
 
 // Streaming services: Goat Stream can't play their DRM-protected video, but it can launch their official apps / sites.
@@ -259,6 +260,7 @@ function headerHTML() {
     <nav>${tabs.map(([id, label]) => `<button class="tab focusable ${S.page === id ? 'on' : ''}" data-act="page" data-page="${id}">${label}</button>`).join('')}</nav>
     <div class="right">
       ${MODE !== 'desktop' ? `<span class="conn-dot ${S.online ? '' : 'off'}" title="${S.online ? 'Connected to ' + esc(S.serverName) : 'PC offline'}"></span>` : ''}
+      <button class="icon-btn focusable" data-act="joinTogether" aria-label="Watch Together" title="Watch Together">${I.people}</button>
       <button class="icon-btn focusable" data-act="page" data-page="search" aria-label="Search">${I.search}</button>
       <button class="icon-btn focusable" data-act="page" data-page="settings" aria-label="Settings">${I.gear}</button>
     </div>
@@ -737,6 +739,7 @@ const Player = {
           <span class="pl-time">0:00 / 0:00</span>
           <span class="sp"></span>
           <button class="btn btn-ghost btn-small hidden" data-pl="next">${I.next} Next Episode</button>
+          ${Together.available() ? `<button class="pl-btn" data-pl="together" title="Watch Together">${I.people}<span class="pl-count" data-wt-count></span></button>` : ''}
           ${DESKTOP ? `<button class="pl-btn" data-pl="external" title="Open in VLC">${I.ext}</button>` : ''}
           <button class="pl-btn" data-pl="fs" aria-label="Full screen">${I.fs}</button>
         </div>
@@ -836,6 +839,7 @@ const Player = {
       else if (a === 'fs') toggleFs();
       else if (a === 'next') { const nx = nextEpisodeAfter(it); if (nx) Player.open(nx, 0); }
       else if (a === 'external') { video.pause(); playExternal(it); }
+      else if (a === 'together') Together.toggle();
     });
     el.addEventListener('dblclick', e => { if (e.target === video) toggleFs(); });
     const togglePlay = () => { if (video.paused) video.play().catch(() => {}); else video.pause(); };
@@ -861,6 +865,7 @@ const Player = {
       wake();
     };
     P.curTime = curTime; P.dur = dur;
+    Together.attach(P);
     load(startSec);
     wake();
     if (TV || !DESKTOP) el.requestFullscreen && el.requestFullscreen().catch(() => {});
@@ -878,9 +883,261 @@ const Player = {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     P.el.remove();
     if (DESKTOP) window.goatDesktop.setPlaying(false);
+    Together.detach(silent);
     if (!silent) render();
   },
 };
+
+// ---------- Watch Together (host side, PC) ----------
+// Friends open a link in any browser — no app, no account, no cloud sign-in. The picture and sound are captured
+// from this player and sent straight to them over an encrypted peer-to-peer connection (WebRTC). PeerJS's free public
+// server only introduces the two devices; video never passes through it. The home server stays closed to the internet.
+const watchPage = () => {
+  const repo = (window.GOAT_CONFIG && window.GOAT_CONFIG.githubRepo) || '';
+  return repo ? `https://${repo.split('/')[0]}.github.io/${repo.split('/')[1]}/watch/` : '';
+};
+const REACTIONS = ['😂', '😮', '🔥', '❤️', '👏', '🐐'];
+const Together = {
+  peer: null, id: '', guests: new Map(), P: null, captured: null, panel: null, open: false,
+  max: Math.min(8, Math.max(1, +store.get('wtMax', 4) || 4)),     // how many friends may join
+  available() { return !TV && !!window.Peer && !!watchPage() && !!(HTMLMediaElement.prototype.captureStream); },
+  link() { return this.id ? `${watchPage()}#${this.id}` : ''; },
+  toggle() { if (!this.peer) this.start(); this.open = !this.open; this.renderPanel(); },
+  start() {
+    const id = 'goatstream-' + Array.from(crypto.getRandomValues(new Uint8Array(8)), b => 'abcdefghjkmnpqrstuvwxyz23456789'[b % 31]).join('');
+    this.peer = new window.Peer(id, { config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }] } });
+    this.peer.on('open', pid => { this.id = pid; this.renderPanel(); });
+    this.peer.on('error', e => { toast('Watch Together: ' + (e.type === 'network' || e.type === 'server-error' ? 'can\'t reach the internet' : e.message)); });
+    this.peer.on('connection', conn => {
+      if (this.guests.size >= this.max) { conn.on('open', () => { conn.send({ t: 'full', max: this.max }); setTimeout(() => conn.close(), 500); }); return; }
+      const g = { conn, call: null, name: String((conn.metadata && conn.metadata.name) || 'Friend').slice(0, 24) };
+      conn.on('open', () => {
+        this.guests.set(conn.peer, g);
+        this.sendInfo(conn);
+        this.callGuest(g);
+        this.say(`${g.name} joined`, true);
+        this.broadcast({ t: 'chat', from: '👥', text: `${g.name} joined` }, g);
+        this.applyBitrates();
+        this.renderPanel();
+      });
+      conn.on('data', d => this.onData(g, d));
+      conn.on('close', () => {
+        if (!this.guests.delete(conn.peer)) return;
+        this.say(`${g.name} left`, true);
+        this.broadcast({ t: 'chat', from: '👥', text: `${g.name} left` });
+        this.applyBitrates();
+        this.renderPanel();
+      });
+    });
+  },
+  stop() {
+    this.broadcast({ t: 'end' });
+    setTimeout(() => { if (this.peer) this.peer.destroy(); this.peer = null; this.id = ''; this.guests.clear(); this.renderPanel(); }, 300);
+    this.open = false;
+  },
+  // the player calls these when a movie starts / closes
+  attach(P) {
+    this.P = P;
+    this.captured = null;
+    this.audioSrc = null;
+    if (!this.peer) return;
+    const v = P.video;
+    const go = () => { this.capture(); for (const g of this.guests.values()) this.pushTracks(g); this.guests.forEach(g => this.sendInfo(g.conn)); };
+    v.addEventListener('playing', go, { once: true });
+    this.renderPanel();
+  },
+  detach(silent) {
+    if (this.panel) { this.panel.remove(); this.panel = null; }
+    this.P = null;
+    if (!silent && this.peer) this.broadcast({ t: 'paused', text: 'The host left the player — hang on…' });
+  },
+  // Picture: each movie frame is drawn onto a canvas that we share. (Sharing the <video> capture directly sent
+  // no picture on some PCs — Chromium's encoder couldn't read those frames.) Up to 1080p, sharp at 16 Mbit/s.
+  // Sound: captured straight from the movie.
+  capture() {
+    if (!this.P) return null;
+    if (!this.captured) {
+      const v = this.P.video;
+      const canvas = document.createElement('canvas');
+      canvas.width = 1280; canvas.height = 720;
+      const ctx = canvas.getContext('2d', { alpha: false });
+      const draw = () => {
+        if (!this.P || this.P.video !== v) return;            // movie closed / switched: stop drawing
+        const w = v.videoWidth, h = v.videoHeight;
+        if (w && h) {
+          const s = Math.min(1, 1920 / w, 1080 / h);
+          const cw = Math.round(w * s / 2) * 2, ch = Math.round(h * s / 2) * 2;
+          if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
+          ctx.drawImage(v, 0, 0, cw, ch);
+        }
+        v.requestVideoFrameCallback(draw);
+      };
+      v.requestVideoFrameCallback(draw);
+      this.audioSrc = v.captureStream();
+      // a new source (seek while converting…) swaps the sound track: hand the new one to every friend
+      this.audioSrc.addEventListener('addtrack', () => this.guests.forEach(g => this.pushTracks(g)));
+      this.captured = new MediaStream([canvas.captureStream(30).getVideoTracks()[0]]);
+    }
+    const a = this.audioSrc.getAudioTracks().find(t => t.readyState === 'live');
+    const cur = this.captured.getAudioTracks()[0];
+    if (a && cur !== a) { if (cur) this.captured.removeTrack(cur); this.captured.addTrack(a); }
+    return this.captured;
+  },
+  callGuest(g) {
+    const s = this.capture();
+    if (!s || !s.getVideoTracks().length) return;      // starts as soon as the movie is playing
+    if (g.call) g.call.close();
+    // codec: let the browser choose (VP8/VP9 are always available; forcing H.264 sent no picture on some PCs)
+    g.call = this.peer.call(g.conn.peer, s);
+    const pc = g.call.peerConnection;
+    pc.addEventListener('connectionstatechange', () => { if (pc.connectionState === 'connected') this.setBitrate(g); });
+  },
+  // High quality, shared fairly: 16 Mbit/s each for 1–2 friends, less as more join (WebRTC also adapts on its own)
+  perFriend() { const n = Math.max(1, this.guests.size); return n <= 2 ? 16e6 : n <= 4 ? 10e6 : 6e6; },
+  setBitrate(g) {
+    const pc = g.call && g.call.peerConnection;
+    if (!pc || pc.connectionState !== 'connected') return;
+    for (const sender of pc.getSenders()) {
+      if (!sender.track || sender.track.kind !== 'video') continue;
+      const p = sender.getParameters();
+      if (!p.encodings || !p.encodings.length) p.encodings = [{}];
+      p.encodings[0].maxBitrate = this.perFriend();
+      p.degradationPreference = 'maintain-resolution';     // keep it sharp; frame rate gives first if the line is tight
+      sender.setParameters(p).catch(() => {});
+    }
+  },
+  applyBitrates() {
+    this.guests.forEach(g => this.setBitrate(g));
+    this.broadcast({ t: 'count', n: this.guests.size, max: this.max });
+  },
+  pushTracks(g) {
+    const s = this.capture();
+    if (!s) return;
+    if (!g.call) { this.callGuest(g); return; }
+    const senders = g.call.peerConnection.getSenders();
+    for (const kind of ['video', 'audio']) {
+      const track = kind === 'video' ? s.getVideoTracks()[0] : s.getAudioTracks()[0];
+      const sender = senders.find(x => x.track ? x.track.kind === kind : false) || null;
+      if (track && sender) sender.replaceTrack(track).catch(() => this.callGuest(g));
+      else if (track && !sender) { this.callGuest(g); return; }   // a track type that wasn't there before: reconnect
+    }
+  },
+  sendInfo(conn) {
+    if (!this.P) return;
+    const t = titleOfItem(this.P.it);
+    conn.send({ t: 'info', title: t.name, sub: this.P.it.show ? `S${this.P.it.season}:E${this.P.it.episode}${this.P.it.epName ? ' · ' + this.P.it.epName : ''}` : (t.year || ''), host: S.serverName || 'Your friend' });
+  },
+  broadcast(msg, except) { for (const g of this.guests.values()) if (g !== except && g.conn.open) g.conn.send(msg); },
+  onData(g, d) {
+    if (!d || typeof d !== 'object') return;
+    if (d.t === 'chat' && d.text) { const text = String(d.text).slice(0, 300); this.say(`${g.name}: ${text}`); this.broadcast({ t: 'chat', from: g.name, text }, g); }
+    if (d.t === 'react' && REACTIONS.includes(d.e)) { this.floatReaction(d.e); this.broadcast({ t: 'react', e: d.e, from: g.name }, g); }
+  },
+  sendChat(text) { text = text.trim().slice(0, 300); if (!text) return; this.say(`You: ${text}`); this.broadcast({ t: 'chat', from: 'Host', text }); },
+  react(e) { this.floatReaction(e); this.broadcast({ t: 'react', e, from: 'Host' }); },
+  log: [],
+  say(line, system) { this.log.push({ line, system }); this.log = this.log.slice(-40); this.renderLog(); if (!this.open && !system) toast(line, 2500); },
+  floatReaction(e) {
+    const host = (this.P && this.P.el) || document.body;
+    const r = document.createElement('div');
+    r.className = 'wt-float';
+    r.textContent = e;
+    r.style.left = (60 + Math.random() * 30) + '%';
+    host.appendChild(r);
+    setTimeout(() => r.remove(), 2600);
+  },
+  renderLog() {
+    const box = this.panel && this.panel.querySelector('.wt-log');
+    if (!box) return;
+    box.innerHTML = this.log.map(l => `<div class="${l.system ? 'sys' : ''}">${esc(l.line)}</div>`).join('');
+    box.scrollTop = box.scrollHeight;
+  },
+  renderPanel() {
+    const P = this.P;
+    const count = this.guests.size;
+    if (P) { const c = P.el.querySelector('[data-wt-count]'); if (c) c.textContent = count ? count : ''; }
+    if (!P || !this.open) { if (this.panel) { this.panel.remove(); this.panel = null; } return; }
+    if (!this.panel) {
+      this.panel = document.createElement('div');
+      this.panel.className = 'wt-panel';
+      P.el.appendChild(this.panel);
+      this.panel.addEventListener('click', e => {
+        const b = e.target.closest('[data-wt]');
+        if (!b) return;
+        e.stopPropagation();
+        const a = b.dataset.wt;
+        if (a === 'copy') { navigator.clipboard.writeText(this.link()).then(() => toast('Link copied — send it to your friend'), () => {}); }
+        else if (a === 'close') { this.open = false; this.renderPanel(); }
+        else if (a === 'stop') this.stop();
+        else if (a === 'react') this.react(b.dataset.e);
+        else if (a === 'max') { this.max = Math.min(8, Math.max(1, this.max + (+b.dataset.d))); store.set('wtMax', this.max); this.applyBitrates(); this.renderPanel(); }
+      });
+      this.panel.addEventListener('keydown', e => {
+        e.stopPropagation();       // typing in chat mustn't pause/seek the movie
+        if (e.key === 'Enter' && e.target.matches('.wt-input')) { this.sendChat(e.target.value); e.target.value = ''; }
+      });
+    }
+    const link = this.link();
+    this.panel.innerHTML = `
+      <div class="wt-head"><b>${I.people} Watch Together</b><button class="pl-btn" data-wt="close" aria-label="Close">${I.close}</button></div>
+      ${link ? `<div class="wt-share"><div class="qr">${qrSvg(link)}</div>
+          <div><p>Send this link to a friend — they just open it in any browser. No app, no sign-in.</p>
+          <div class="wt-link">${esc(link.replace(/^https:\/\//, ''))}</div>
+          <button class="btn btn-play btn-small" data-wt="copy">Copy link</button></div></div>
+        <div class="wt-code">Friends with the Goat Stream app: 👥 → enter <b>${esc(wtCode(this.id))}</b></div>`
+        : '<p class="wt-wait"><span class="spinner" style="display:inline-block;width:1rem;height:1rem;border-width:2px;vertical-align:middle"></span>&nbsp; Creating your private room…</p>'}
+      <div class="wt-max"><span>Friends allowed</span>
+        <button class="pl-btn" data-wt="max" data-d="-1" aria-label="Fewer">−</button><b>${this.max}</b><button class="pl-btn" data-wt="max" data-d="1" aria-label="More">+</button>
+        <small>needs ~${this.max * 8}+ Mbit/s upload for HD</small></div>
+      <div class="wt-guests"><b>${count}/${this.max} watching</b> ${count ? [...this.guests.values()].map(g => `<span class="pill gold">● ${esc(g.name)}</span>`).join(' ') : '<span style="color:#999">· nobody yet</span>'}</div>
+      <div class="wt-log"></div>
+      <div class="wt-react">${REACTIONS.map(e => `<button data-wt="react" data-e="${e}">${e}</button>`).join('')}</div>
+      <input class="input wt-input" placeholder="Say something…" maxlength="300">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:.6rem">
+        <small style="color:#888">🔒 Encrypted, straight from your PC · share only what you have the rights to</small>
+        ${this.peer ? '<button class="btn btn-dark btn-small" data-wt="stop">End session</button>' : ''}</div>`;
+    this.renderLog();
+  },
+};
+window.__goatWT = Together;     // for troubleshooting from the developer console
+
+// Room codes: "goatstream-vyyy553k" <-> "VYYY-553K" (easy to read out and type with a remote)
+const wtCode = id => { const c = String(id || '').replace(/^goatstream-/, '').toUpperCase(); return c.length > 4 ? c.slice(0, 4) + '-' + c.slice(4) : c; };
+const wtIdFromCode = code => {
+  const c = String(code || '').trim().toLowerCase().replace(/^.*#/, '').replace(/^goatstream-/, '').replace(/[^a-z0-9]/g, '');
+  return c ? 'goatstream-' + c : '';
+};
+
+// Join a friend's session from inside the app (TV or PC): type their code, watch here
+function openJoinTogether() {
+  const ov = openOverlay(`<div class="dialog">
+    <div class="big-icon">👥</div><h2>Watch Together</h2>
+    <p>Enter the code your friend sees in their Goat Stream player.</p>
+    <div class="field"><input class="input focusable" id="wt-code" data-autofocus placeholder="ABCD-1234" maxlength="40" autocomplete="off" style="text-transform:uppercase;letter-spacing:.15em;text-align:center"></div>
+    <div class="btns"><button class="btn btn-play focusable" id="wt-join">Join</button><button class="btn btn-dark focusable" data-act="closeOverlay">Cancel</button></div>
+    ${Together.available() ? '<p style="color:#999;font-size:.85rem;margin-top:1rem">Want to host? Play a movie and press 👥 in the player.</p>' : ''}</div>`);
+  const go = () => {
+    const id = wtIdFromCode(ov.querySelector('#wt-code').value);
+    if (id.length < 'goatstream-'.length + 6) { toast('Type the code from your friend\'s screen, like ABCD-1234'); return; }
+    closeOverlay(ov);
+    openWatchViewer(id);
+  };
+  ov.querySelector('#wt-join').addEventListener('click', go);
+  ov.querySelector('#wt-code').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+}
+function openWatchViewer(id) {
+  const name = TV ? window.GoatTV.deviceName() : (S.serverName || '');
+  const el = document.createElement('div');
+  el.className = 'wt-viewer';
+  el.innerHTML = `<iframe src="watch.html?embedded=1&name=${encodeURIComponent(name)}#${encodeURIComponent(id)}" allow="autoplay; fullscreen" title="Watch Together"></iframe>`;
+  const ov = openOverlay('', { onClose: () => { try { el.querySelector('iframe').contentWindow.postMessage({ goatWatch: 'leave' }, '*'); } catch (e) { /* gone */ } } });
+  ov.classList.add('wt-viewer-wrap');
+  ov.appendChild(el);
+  setTimeout(() => el.querySelector('iframe').focus(), 100);
+}
+window.addEventListener('message', e => {
+  if (e.data && e.data.goatWatch === 'close') { const top = overlays[overlays.length - 1]; if (top && top.classList.contains('wt-viewer-wrap')) closeOverlay(top); }
+});
 
 // ---------- spatial navigation (TV remotes, keyboards) ----------
 const Nav = {
@@ -975,6 +1232,7 @@ const actions = {
   page: el => go(el.dataset.page),
   folderFilter: el => { S.folderFilter = el.dataset.path; render(); },
   fixMatch: el => openFixMatch(el.dataset.key),
+  joinTogether: () => openJoinTogether(),
   open: el => openTitle(el.dataset.key),
   season: el => { closeOverlay(); const ov = openTitle(el.dataset.key, +el.dataset.season); const b = ov && ov.querySelector('.season-btn.on'); if (b) b.focus(); },
   closeOverlay: () => closeOverlay(),

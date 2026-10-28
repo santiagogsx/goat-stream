@@ -1,0 +1,99 @@
+<!doctype html>
+<!-- Goat Stream · Watch Together — the page a friend opens. No app, no account, no cloud sign-in:
+     the movie comes straight from the host's PC over an encrypted peer-to-peer connection. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#000000">
+  <title>Watch Together · Goat Stream</title>
+  <link rel="icon" href="img/icon.png">
+  <style>
+    :root { --gold: #e6b34a; --gold-hi: #ffd978; --gold-grad: linear-gradient(180deg, #ffe08a 0%, #e6b34a 45%, #b07a1f 100%); }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: #000; color: #f5f5f5; font-family: "Segoe UI", Roboto, Arial, sans-serif; }
+    button, input { font: inherit; color: inherit; }
+    button { cursor: pointer; border: 0; background: none; }
+    .center { min-height: 100%; display: grid; place-items: center; padding: 24px; text-align: center;
+      background: radial-gradient(circle at 50% 0%, #2a1e06 0%, #050505 60%); }
+    .card { width: min(30rem, 100%); }
+    .card img { width: 9rem; border-radius: 22%; box-shadow: 0 0 60px rgba(230,179,74,.25); }
+    h1 { margin: 1rem 0 .3rem; font-size: 1.8rem; }
+    p { color: #c9c9c9; line-height: 1.5; }
+    .input { width: 100%; background: #0d0d0d; border: 1px solid #555; border-radius: 8px; padding: .8rem 1rem; font-size: 1.05rem; outline: none; margin: .8rem 0; }
+    .input:focus { border-color: var(--gold); }
+    .btn { display: inline-flex; align-items: center; gap: .5rem; padding: .8rem 1.8rem; border-radius: 8px; font-weight: 700; font-size: 1.05rem; background: var(--gold-grad); color: #111; }
+    .btn.dark { background: #2a2a2a; color: #fff; border: 1px solid #3a3a3a; }
+    .small { font-size: .85rem; color: #888; }
+    .spin { width: 40px; height: 40px; margin: 20px auto; border-radius: 50%; border: 4px solid #333; border-top-color: var(--gold); animation: s .9s linear infinite; }
+    @keyframes s { to { transform: rotate(360deg); } }
+
+    #stage { position: fixed; inset: 0; display: none; background: #000; }
+    #stage.on { display: block; }
+    video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+    .bar { position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center; gap: 1rem; padding: 1rem 1.2rem;
+      background: linear-gradient(180deg, rgba(0,0,0,.85), transparent); transition: opacity .3s; }
+    .bar img { height: 2rem; }
+    .bar .t { flex: 1; min-width: 0; }
+    .bar .t b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .bar .t span { color: #aaa; font-size: .85rem; }
+    .live { font-size: .75rem; font-weight: 800; color: #111; background: var(--gold-grad); padding: .15rem .5rem; border-radius: 4px; }
+    .ctl { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: .6rem; padding: 1rem 1.2rem;
+      background: linear-gradient(0deg, rgba(0,0,0,.85), transparent); transition: opacity .3s; flex-wrap: wrap; }
+    .ctl .grow { flex: 1; }
+    .ctl input[type=range] { width: 7rem; accent-color: var(--gold); }
+    .icon { width: 2.6rem; height: 2.6rem; border-radius: 50%; display: grid; place-items: center; font-size: 1.3rem; }
+    .icon:hover { background: rgba(255,255,255,.12); }
+    .react button { font-size: 1.5rem; padding: .1rem .3rem; border-radius: 6px; }
+    .react button:hover { background: rgba(255,255,255,.1); }
+    #stage.idle .bar, #stage.idle .ctl { opacity: 0; }
+    #stage.idle { cursor: none; }
+    .chat { position: absolute; left: 1.2rem; bottom: 5.5rem; width: min(22rem, 80vw); display: grid; gap: .35rem; pointer-events: none; }
+    .chat div { background: rgba(0,0,0,.65); border-radius: 8px; padding: .35rem .7rem; font-size: .92rem; animation: in .2s; justify-self: start; max-width: 100%; }
+    .chat div.sys { color: #bbb; font-style: italic; font-size: .82rem; }
+    @keyframes in { from { opacity: 0; transform: translateY(6px); } }
+    .say { width: min(20rem, 50vw); background: rgba(0,0,0,.6); border: 1px solid #555; border-radius: 20px; padding: .5rem .9rem; outline: none; }
+    .say:focus { border-color: var(--gold); }
+    .float { position: absolute; bottom: 6rem; font-size: 3rem; pointer-events: none; animation: up 2.6s ease-out forwards; }
+    @keyframes up { 0% { opacity: 0; transform: translateY(0) scale(.6); } 15% { opacity: 1; transform: translateY(-20px) scale(1.1); } 100% { opacity: 0; transform: translateY(-45vh); } }
+    .overlay-msg { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; pointer-events: none; }
+    .overlay-msg div { background: rgba(0,0,0,.7); padding: 1rem 1.4rem; border-radius: 10px; }
+    .hidden { display: none !important; }
+    .embedded .center { background: #050505; }
+    .embedded .card img { width: 6rem; }
+    button:focus-visible, .embedded button:focus { outline: none; box-shadow: 0 0 0 3px var(--gold-hi), 0 0 18px rgba(230,179,74,.5); }
+    @media (max-width: 600px) { .ctl input[type=range] { display: none; } .say { width: 100%; order: 10; } }
+  </style>
+</head>
+<body>
+  <div class="center" id="join">
+    <div class="card">
+      <img src="img/icon.png" alt="Goat Stream">
+      <h1>Watch Together</h1>
+      <p id="join-text">A friend invited you to watch with them on Goat Stream. No app or account needed.</p>
+      <input class="input" id="name" maxlength="24" placeholder="Your name" autocomplete="nickname">
+      <button class="btn" id="go">▶ Join</button>
+      <p class="small">🔒 The movie comes straight from your friend's PC, encrypted end to end.</p>
+    </div>
+  </div>
+
+  <div id="stage">
+    <video id="v" playsinline autoplay></video>
+    <div class="overlay-msg" id="msg"><div><div class="spin"></div><span id="msg-text">Connecting to your friend…</span></div></div>
+    <div class="bar"><img src="img/wordmark.png" alt="Goat Stream">
+      <div class="t"><b id="title">Watch Together</b><span id="sub"></span></div><span class="small" id="count"></span><span class="live">● LIVE</span></div>
+    <div class="chat" id="chat"></div>
+    <div class="ctl">
+      <button class="icon" id="mute" title="Sound">🔊</button><input type="range" id="vol" min="0" max="1" step="0.05" value="1">
+      <div class="react" id="react"></div>
+      <span class="grow"></span>
+      <input class="say" id="say" maxlength="300" placeholder="Say something…">
+      <button class="icon" id="fs" title="Full screen">⛶</button>
+    </div>
+  </div>
+
+  <script src="js/peerjs.min.js"></script>
+  <script src="js/watch.js"></script>
+</body>
+</html>

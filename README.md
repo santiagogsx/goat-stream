@@ -157,6 +157,21 @@ The app shows Apple TV as *Coming soon*. Building it needs a **Mac with Xcode** 
 
 Local network = best quality: a 4K remux needs ~50–100 Mbit/s. Wired Ethernet or 5 GHz Wi-Fi recommended. Cloud 4K depends on your internet speed.
 
+## 👥 Watch Together
+
+Watch with friends anywhere — they don't need an account, a cloud sign-in or even the app.
+
+1. On the PC, play a movie and press **👥** in the player. Set **Friends allowed** (1–8).
+2. Share it:
+   - **Link / QR code** → your friend opens it in any browser (phone, laptop, TV browser);
+   - **Code** (like `VYYY-553K`) → friends with the Goat Stream **TV or PC app** press **👥** at the top and type it.
+3. Chat and emoji reactions show up for everyone; you control play/pause/seek for the whole group.
+
+**Quality:** sharp 1080p sent straight from your PC, up to 16 Mbit/s per friend (less per friend as more join). It needs your internet's *upload* speed: about 8 Mbit/s per friend for good HD.
+**Privacy:** the picture and sound go directly from your PC to each friend, **encrypted end to end** (WebRTC). Your internet provider sees encrypted traffic to your friend's address — not the movie or its title. The free PeerJS service only introduces the two devices; video never passes through it. Your home server stays closed to the internet. The room ends when you press *End session* or close Goat Stream.
+**Hosting** works from the Windows app (or a PC browser); TVs and phones join.
+**Copyright:** only share what you have the right to share (your own videos, public-domain or licensed films). Live-streaming a commercial movie to people outside your home can count as a public performance even though nothing is copied — when in doubt, have each friend own the movie too.
+
 ## 📴 No internet? Still works
 
 When the internet is down, everything on your home network keeps going: the PC app, the TV app and TV browsers play every movie on your PC. Covers, backgrounds, title logos and episode pictures are **saved on the PC** (and kept by each TV), so the library still looks complete. Only Google Drive / Dropbox movies need the internet — they come back by themselves when it does.

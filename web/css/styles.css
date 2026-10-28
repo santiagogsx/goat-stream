@@ -350,6 +350,36 @@ body:has(.player) { overflow: hidden; }
 .update-bar { position: fixed; left: 50%; bottom: 1.4rem; transform: translateX(-50%); z-index: 150; display: flex; align-items: center; gap: .8rem;
   background: #1b160b; border: 1px solid var(--gold); border-radius: 10px; padding: .6rem .6rem .6rem 1.2rem; box-shadow: 0 10px 40px rgba(0,0,0,.7); animation: rise .3s; }
 
+/* ---------- Watch Together (host panel in the player) ---------- */
+.pl-btn { position: relative; }
+.pl-count { position: absolute; top: .1rem; right: .1rem; min-width: 1.1rem; height: 1.1rem; border-radius: .6rem; background: var(--gold); color: #111; font-size: .7rem; font-weight: 800; display: grid; place-items: center; }
+.pl-count:empty { display: none; }
+.wt-panel { position: absolute; right: 1.2rem; top: 5rem; bottom: 7rem; width: min(24rem, 90vw); z-index: 5; display: flex; flex-direction: column; gap: .7rem;
+  background: rgba(14,12,8,.94); border: 1px solid var(--gold-lo); border-radius: 12px; padding: 1rem; box-shadow: 0 10px 40px rgba(0,0,0,.7); }
+.wt-head { display: flex; justify-content: space-between; align-items: center; color: var(--gold-hi); }
+.wt-head b { display: flex; gap: .5rem; align-items: center; }
+.wt-share { display: flex; gap: .8rem; align-items: flex-start; }
+.wt-share .qr { width: 6.5rem; height: 6.5rem; flex: none; background: #fff; border-radius: 6px; padding: .2rem; }
+.wt-share .qr svg { width: 100%; height: 100%; }
+.wt-share p { margin: 0 0 .4rem; font-size: .85rem; color: #ccc; }
+.wt-link { font-size: .75rem; color: var(--gold-hi); word-break: break-all; margin-bottom: .5rem; }
+.wt-max { display: flex; align-items: center; gap: .4rem; font-size: .9rem; flex-wrap: wrap; }
+.wt-max .pl-btn { width: 2rem; height: 2rem; font-size: 1.2rem; border: 1px solid #444; }
+.wt-max b { min-width: 1.4rem; text-align: center; color: var(--gold-hi); font-size: 1.1rem; }
+.wt-max small { color: #888; width: 100%; }
+.wt-code { font-size: .85rem; color: #ccc; background: #1a1610; border: 1px dashed var(--gold-lo); border-radius: 8px; padding: .5rem .7rem; }
+.wt-code b { color: var(--gold-hi); letter-spacing: .12em; font-size: 1rem; }
+.overlay.wt-viewer-wrap { padding: 0; background: #000; align-items: stretch; }
+.wt-viewer { position: fixed; inset: 0; z-index: 1; }
+.wt-viewer iframe { width: 100%; height: 100%; border: 0; display: block; background: #000; }
+.wt-log { flex: 1; min-height: 4rem; overflow-y: auto; font-size: .9rem; display: grid; align-content: start; gap: .3rem; }
+.wt-log .sys { color: #999; font-style: italic; font-size: .8rem; }
+.wt-react { display: flex; gap: .3rem; }
+.wt-react button { font-size: 1.4rem; padding: .15rem .35rem; border-radius: 6px; }
+.wt-react button:hover { background: rgba(255,255,255,.1); transform: scale(1.15); }
+.wt-float { position: absolute; bottom: 7rem; font-size: 3rem; z-index: 6; pointer-events: none; animation: floatUp 2.6s ease-out forwards; }
+@keyframes floatUp { 0% { opacity: 0; transform: translateY(0) scale(.6); } 15% { opacity: 1; transform: translateY(-20px) scale(1.1); } 100% { opacity: 0; transform: translateY(-45vh) scale(1); } }
+
 /* ---------- toasts ---------- */
 #toasts { position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%); z-index: 200; display: grid; gap: .5rem; justify-items: center; pointer-events: none; }
 .toast { background: #222; border: 1px solid var(--gold-lo); color: #fff; padding: .8rem 1.3rem; border-radius: 8px; box-shadow: 0 8px 30px rgba(0,0,0,.6); font-size: 1rem; animation: rise .25s; transition: opacity .4s; max-width: 90vw; }

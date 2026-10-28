@@ -476,8 +476,8 @@ function start({ dataDir, webDir, appKeys, version }) {
     }
     if (mode === 'remux' || mode === 'transcode') return convert(req, res, input, inputHeaders, it, mode, startSec);
     if (it.source === 'local') return sendFile(req, res, it.path, VIDEO_TYPES[path.extname(it.path).toLowerCase()] || 'application/octet-stream');
-    if (it.source === 'dropbox' || it.source === 'onedrive') { res.writeHead(302, { Location: info.url, 'Cache-Control': 'no-store' }); return res.end(); }
-    // Google Drive: proxy with auth header, passing range through so seeking works
+    // Cloud files pass through the PC (range requests kept, so seeking works). Keeping them on this address lets
+    // the PC player share them in Watch Together. (TVs stream cloud files directly, not through here.)
     const ac = new AbortController();
     res.on('close', () => ac.abort());
     const headers = Object.assign({}, info.headers);
