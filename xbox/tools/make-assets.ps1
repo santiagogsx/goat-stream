@@ -26,7 +26,11 @@ function Draw-Fit($g, $im, $x, $y, $w, $h) {
   $dw = $im.Width * $s; $dh = $im.Height * $s
   $g.DrawImage($im, [single]($x + ($w - $dw) / 2), [single]($y + ($h - $dh) / 2), [single]$dw, [single]$dh)
 }
-function Save($bmp, $g, $path) { $g.Dispose(); $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose() }
+function Save($bmp, $g, $path) {
+  $g.Dispose(); $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
+  # Windows refuses app pictures over 200 KB; without the sharp version it scales up the smaller one instead
+  if ($path.StartsWith($assets) -and (Get-Item $path).Length -gt 204800) { Remove-Item $path; Write-Warning "skipped $(Split-Path $path -Leaf) (over 200 KB)" }
+}
 function Credit($g, $w, $h, $size) {
   $f = New-Object System.Drawing.Font 'Segoe UI', $size
   $b = New-Object System.Drawing.SolidBrush $gold
