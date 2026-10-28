@@ -893,35 +893,56 @@ const Nav = {
   focus(el) {
     if (!el) return;
     el.focus({ preventScroll: true });
-    if (el.closest('.hero') || el.closest('.top')) { if (!overlays.length) window.scrollTo({ top: 0, behavior: 'smooth' }); }
-    else el.scrollIntoView({ block: overlays.length ? 'nearest' : 'center', inline: 'nearest', behavior: 'smooth' });
+    this.reveal(el);
   },
+  // Scroll only when the highlight gets near an edge, and only as far as needed — feels calm on a TV
+  reveal(el) {
+    const track = el.closest('.track');
+    if (track) {
+      const t = track.getBoundingClientRect(), r = el.getBoundingClientRect(), pad = t.width * 0.05;
+      if (r.left < t.left + pad) track.scrollBy({ left: r.left - t.left - pad, behavior: 'smooth' });
+      else if (r.right > t.right - pad) track.scrollBy({ left: r.right - t.right + pad, behavior: 'smooth' });
+    }
+    if (el.closest('.top')) return;
+    if (el.closest('.hero') && !overlays.length) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+    const box = el.closest('.overlay') || el.closest('.onboard');
+    const r = el.getBoundingClientRect(), vh = innerHeight;
+    if (r.top < vh * 0.18 || r.bottom > vh * 0.86) {
+      (box || window).scrollBy({ top: r.top + r.height / 2 - vh * 0.45, behavior: 'smooth' });
+    }
+  },
+  // Up/down: go to the very next row, then the closest item in it. Left/right: stay in the same row.
   move(dir) {
     const list = this.items();
     const cur = document.activeElement;
     if (!cur || !list.includes(cur)) { this.focus(list.find(e => e.closest('.hero')) || list.find(e => e.closest('main')) || list[0]); return; }
     const a = cur.getBoundingClientRect();
     const ax = a.left + a.width / 2, ay = a.top + a.height / 2;
-    let best = null, bestScore = Infinity;
-    for (const el of list) {
-      if (el === cur) continue;
+    const rects = list.filter(el => el !== cur).map(el => {
       const b = el.getBoundingClientRect();
-      const bx = b.left + b.width / 2, by = b.top + b.height / 2;
-      let main, gap;
-      if (dir === 'left' || dir === 'right') {
-        main = dir === 'left' ? ax - bx : bx - ax;
-        if (main <= 1) continue;
-        gap = Math.max(0, Math.max(a.top, b.top) - Math.min(a.bottom, b.bottom)) ? Math.abs(by - ay) : 0;
-      } else {
-        main = dir === 'up' ? ay - by : by - ay;
-        if (main <= 1 || (dir === 'up' ? b.top >= a.top : b.top <= a.top)) continue;
-        gap = Math.max(0, Math.max(a.left, b.left) - Math.min(a.right, b.right)) + Math.abs(bx - ax) * 0.25;
-      }
-      const score = main + gap * 3;
-      if (score < bestScore) { bestScore = score; best = el; }
+      return { el, b, x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    });
+    const hGap = c => Math.max(0, Math.max(a.left, c.b.left) - Math.min(a.right, c.b.right));
+    let best = null;
+    if (dir === 'up' || dir === 'down') {
+      let cands = rects.filter(c => (dir === 'down' ? c.y > ay + 8 : c.y < ay - 8));
+      // the fixed header only counts when there's nothing else above (so rows scrolled off the top stay reachable)
+      const inHeader = c => !!c.el.closest('.top');
+      if (!cur.closest('.top') && cands.some(c => !inHeader(c))) cands = cands.filter(c => !inHeader(c));
+      if (!cands.length) return;
+      const nearest = Math.min(...cands.map(c => Math.abs(c.y - ay)));
+      const row = cands.filter(c => Math.abs(c.y - ay) <= nearest + 18);
+      row.sort((p, q) => (hGap(p) - hGap(q)) || (Math.abs(p.x - ax) - Math.abs(q.x - ax)));
+      best = row[0];
+    } else {
+      const overlap = c => Math.min(a.bottom, c.b.bottom) - Math.max(a.top, c.b.top);
+      const cands = rects.filter(c => (dir === 'right' ? c.x > ax + 4 : c.x < ax - 4) && overlap(c) >= Math.min(a.height, c.b.height) * 0.3);
+      cands.sort((p, q) => Math.abs(p.x - ax) - Math.abs(q.x - ax));
+      best = cands[0];
     }
-    if (best) this.focus(best);
+    if (best) this.focus(best.el);
   },
+  lastMove: 0,
 };
 
 document.addEventListener('keydown', e => {
@@ -931,9 +952,11 @@ document.addEventListener('keydown', e => {
   const inInput = e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT';
   if (dirs[k]) {
     if (inInput && (k === 'ArrowLeft' || k === 'ArrowRight') && e.target.type !== 'range') return;
-    // only take over arrows when someone's using a remote/keyboard (not while typing in a page that scrolls)
     e.preventDefault();
     document.documentElement.classList.add('remote');
+    // holding a button down: steady pace instead of a pile-up of scrolls
+    if (e.repeat && Date.now() - Nav.lastMove < 120) return;
+    Nav.lastMove = Date.now();
     Nav.move(dirs[k]);
   } else if ((k === 'Escape' || k === 'GoBack' || k === 'BrowserBack' || (k === 'Backspace' && !inInput)) && !TV) {
     if (window.goatBack()) e.preventDefault();

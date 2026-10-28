@@ -29,8 +29,17 @@ img { display: block; }
 svg { width: 1.2em; height: 1.2em; flex: none; }
 
 /* ---------- focus (remote / keyboard) ---------- */
-.focusable { outline: none; }
-.focusable:focus-visible, html.tv .focusable:focus { outline: 3px solid var(--gold); outline-offset: 3px; }
+.focusable { outline: none; transition: transform .18s ease, box-shadow .18s ease, background-color .18s ease, border-color .18s ease; }
+/* remote / keyboard highlight: a gold ring that glides between items */
+.focusable:focus-visible, html.tv .focusable:focus, html.remote .focusable:focus {
+  outline: none; box-shadow: 0 0 0 3px var(--gold), 0 0 18px rgba(230,179,74,.45); }
+/* toggles sit inside a rounded frame that clips anything outside — draw their ring inside instead */
+.seg button:focus-visible, html.tv .seg button:focus, html.remote .seg button:focus {
+  box-shadow: inset 0 0 0 3px var(--gold-hi); background-color: rgba(230,179,74,.25); }
+.seg button.on:focus-visible, html.tv .seg button.on:focus, html.remote .seg button.on:focus { box-shadow: inset 0 0 0 3px #fff; }
+html.tv .btn:focus, html.remote .btn:focus, html.tv .tab:focus, html.remote .tab:focus { transform: scale(1.06); }
+html.tv .tab:focus, html.remote .tab:focus { color: #fff; background: rgba(230,179,74,.18); }
+html.tv .li:focus-within, html.remote .li:focus-within { background: rgba(255,255,255,.04); border-radius: 8px; }
 html.tv .card:focus, .card:focus-visible { transform: scale(1.08); z-index: 3; box-shadow: 0 0 0 3px var(--gold), 0 10px 40px rgba(230, 179, 74, .35); outline: none; }
 
 /* ---------- boot / spinner ---------- */
