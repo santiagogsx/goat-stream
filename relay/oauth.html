@@ -1,0 +1,42 @@
+<!doctype html>
+<!-- Goat Stream sign-in hand-off page.
+     Host this ONE file on any public https address (e.g. GitHub Pages) and register that address as a
+     redirect URL with Google and Dropbox. After you sign in on your phone, Google/Dropbox send the phone here,
+     and this page sends it straight on to Goat Stream on your PC at home. Nothing is stored or sent anywhere else. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Goat Stream</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #070707; color: #fff;
+      font-family: "Segoe UI", Roboto, Arial, sans-serif; text-align: center; padding: 24px; box-sizing: border-box; }
+    h1 { color: #ffd978; font-size: 1.5rem; }
+    p { color: #bbb; line-height: 1.5; max-width: 26rem; margin: .6rem auto; }
+    .spin { width: 42px; height: 42px; margin: 24px auto; border-radius: 50%; border: 4px solid #333; border-top-color: #e6b34a; animation: s .9s linear infinite; }
+    @keyframes s { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="box"><h1>🐐 Goat Stream</h1><div class="spin"></div><p>Finishing sign-in on your PC…</p></div>
+  <script>
+    (function () {
+      var q = new URLSearchParams(location.search);
+      var parts = (q.get('state') || '').split('~');        // "<pc-address>~<provider>~<random>"
+      var host = parts[0], provider = parts[1];
+      // Only ever send the phone to a home-network address (192.168.x.x / 10.x.x.x / 172.16-31.x.x)
+      var m = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}:\d{2,5}$/.exec(host || '');
+      var home = m && (m[1] === '10' || (m[1] === '192' && m[2] === '168') || (m[1] === '172' && +m[2] >= 16 && +m[2] <= 31));
+      if (home && (provider === 'google' || provider === 'dropbox' || provider === 'onedrive')) {
+        location.replace('http://' + host + '/oauth/' + provider + '/callback' + location.search);
+        setTimeout(function () {
+          document.getElementById('box').innerHTML = '<h1>Almost there</h1><p>Your phone couldn\'t reach your PC. Make sure your phone is on the same Wi-Fi as your PC and Goat Stream is open, then scan the QR code again.</p>';
+        }, 8000);
+      } else {
+        document.getElementById('box').innerHTML = '<h1>Nothing to do here</h1><p>This page finishes Goat Stream sign-ins. Start from the QR code in Goat Stream.</p>';
+      }
+    })();
+  </script>
+</body>
+</html>

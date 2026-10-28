@@ -1,0 +1,15 @@
+# dependencies & builds
+node_modules/
+desktop/dist/
+android-tv/.gradle/
+android-tv/build/
+android-tv/app/build/
+android-tv/local.properties
+android-tv/.idea/
+*.apk
+*.aab
+
+# never commit signing keys or secrets
+*.jks
+*.keystore
+.env

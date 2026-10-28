@@ -1,0 +1,7 @@
+{
+  "google": { "clientId": "", "clientSecret": "" },
+  "dropbox": { "appKey": "" },
+  "onedrive": { "clientId": "" },
+  "tmdb": "",
+  "oauthRelay": "https://santiagogsx.github.io/goat-stream/relay/oauth.html"
+}

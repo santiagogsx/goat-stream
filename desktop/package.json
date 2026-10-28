@@ -1,0 +1,62 @@
+{
+  "name": "goat-stream",
+  "productName": "Goat Stream",
+  "version": "1.0.0",
+  "description": "Goat Stream - your movies from your PC, Google Drive and Dropbox on every screen",
+  "main": "main.js",
+  "author": "Santiago",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win",
+    "dist:zip": "electron-builder --win zip --publish never"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9",
+    "ffmpeg-static": "^5.2.0"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.goatstream.desktop",
+    "productName": "Goat Stream",
+    "copyright": "Created by Santiago",
+    "files": [
+      "main.js",
+      "preload.js",
+      "server.js",
+      "config.json",
+      "icon.png",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../web",
+        "to": "web"
+      }
+    ],
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "icon.png"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "santiagogsx",
+        "repo": "goat-stream"
+      }
+    ],
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Goat Stream"
+    }
+  }
+}
