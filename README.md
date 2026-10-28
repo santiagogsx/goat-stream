@@ -114,7 +114,41 @@ The TV app **finds your PC by itself**. A pop-up appears on the PC → click **A
 
 ---
 
-## 4. Any other TV (Samsung, LG, Roku, Fire TV browser, phones…)
+## 4. Samsung, LG and Roku TV apps
+
+Every release on <https://github.com/santiagogsx/goat-stream/releases/latest> includes:
+
+| TV | File | What it is |
+|---|---|---|
+| **LG** (webOS) | `GoatStream-LG.ipk` | Ready to install |
+| **Samsung** (Tizen) | `GoatStream-Samsung-project.zip` | Project to install with Tizen Studio (Samsung requires your own certificate) |
+| **Roku** | `GoatStream-Roku.zip` | Ready to sideload |
+
+All three find your PC by themselves (Roku) or by scanning your home network (Samsung/LG), link with one **Allow** on the PC, and play in 4K with the TV's own player. Samsung/LG also have chat-free **Watch Together** joining with a code. These steps install on **your own TVs**; to let anyone install from the TV app stores, submit the same packages to Samsung Seller Office, LG Seller Lounge or the Roku Developer Dashboard (free).
+
+### LG TV
+1. On the TV open **LG Content Store** → install **Developer Mode** → sign in with a free account from <https://webostv.developer.lge.com> → turn **Dev Mode Status** ON (the TV restarts) → turn **Key Server** ON and note the IP and passphrase.
+2. On the PC:
+   ```
+   npm install -g @webos-tools/cli
+   ares-setup-device -a tv -i "host=TV-IP" -i "port=9922" -i "username=prisoner"
+   ares-novacom --device tv --getkey
+   ares-install --device tv GoatStream-LG.ipk
+   ```
+3. Developer Mode lasts a limited time — open the Developer Mode app and press **Extend** now and then.
+
+### Samsung TV
+1. Install **Tizen Studio** (<https://developer.tizen.org>) and, in its Package Manager → Extension SDK, **Samsung TV Extensions** and **Samsung Certificate Extension**.
+2. On the TV: **Apps** → press **1 2 3 4 5** on the remote → turn **Developer mode** ON → enter your PC's IP → restart the TV.
+3. Tizen Studio → **Device Manager** → add the TV's IP → connect.
+4. **Certificate Manager** → new **Samsung** certificate (sign in with a free Samsung account; it adds your TV automatically).
+5. Unzip `GoatStream-Samsung-project.zip` → **File → Import → Tizen → Tizen Project** → pick the folder → right-click the project → **Run As → Tizen Web Application**. Goat Stream appears in the TV's apps.
+
+### Roku
+1. With the Roku remote press **Home ×3, Up ×2, Right, Left, Right, Left, Right** → **Enable installer** and set a password (the Roku restarts).
+2. On the PC open `http://ROKU-IP` → sign in as `rokudev` with that password → **Upload** `GoatStream-Roku.zip` → **Install**.
+
+## 5. Any other TV (Fire TV browser, phones, older TVs…)
 
 Open the TV's web browser and go to the address shown in **Settings → TVs & devices**, e.g. `http://192.168.1.20:8787`. Click **Allow** on the PC. Use the remote's arrows to move around.
 

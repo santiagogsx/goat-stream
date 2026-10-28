@@ -36,6 +36,44 @@ jobs:
             -c.publish.provider=github -c.publish.owner="${GITHUB_REPOSITORY_OWNER}" -c.publish.repo="${GITHUB_REPOSITORY#*/}" \
             -c.publish.releaseType=release
 
+  smart-tvs:
+    needs: windows          # LG (webOS .ipk), Samsung (Tizen project) and Roku (.zip) packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build packages
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          IFS=. read -r MAJOR MINOR PATCH <<< "$VERSION"
+          OUT="$RUNNER_TEMP/out"; mkdir -p "$OUT"
+
+          # LG webOS: the shared UI + appinfo.json -> .ipk
+          mkdir -p build/lg && cp -r web/. build/lg/ && cp lg-tv/* build/lg/
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" build/lg/appinfo.json
+          npx -y -p @webos-tools/cli ares-package build/lg -o "$OUT/lg"
+          cp "$OUT"/lg/*.ipk "$OUT/GoatStream-LG.ipk"
+
+          # Samsung Tizen: ready-to-open project (signing needs your Samsung certificate in Tizen Studio)
+          mkdir -p build/samsung && cp -r web/. build/samsung/ && cp samsung-tv/* build/samsung/
+          sed -i "s/version=\"[0-9.]*\" viewmodes/version=\"$VERSION\" viewmodes/" build/samsung/config.xml
+          (cd build/samsung && zip -qr "$OUT/GoatStream-Samsung-project.zip" .)
+
+          # Roku: manifest at the zip root, ready to sideload
+          mkdir -p build/roku && cp -r roku/. build/roku/
+          sed -i "s/^major_version=.*/major_version=$MAJOR/; s/^minor_version=.*/minor_version=$MINOR/; s/^build_version=.*/build_version=$PATCH/" build/roku/manifest
+          (cd build/roku && zip -qr "$OUT/GoatStream-Roku.zip" .)
+          ls -la "$OUT"
+      - name: Attach to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ runner.temp }}/out/GoatStream-LG.ipk
+            ${{ runner.temp }}/out/GoatStream-Samsung-project.zip
+            ${{ runner.temp }}/out/GoatStream-Roku.zip
+
   android-tv:
     needs: windows          # the Windows job creates the release page; the APK is added to it
     runs-on: ubuntu-latest
@@ -53,7 +91,7 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.GOAT_KEYSTORE_BASE64 }}
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/goat.jks"
+            printf '%s' "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 -d > "$RUNNER_TEMP/goat.jks"
             echo "GOAT_KEYSTORE=$RUNNER_TEMP/goat.jks" >> "$GITHUB_ENV"
           else
             echo "::warning::GOAT_KEYSTORE_BASE64 secret missing - TV updates won't install over older versions. See README."

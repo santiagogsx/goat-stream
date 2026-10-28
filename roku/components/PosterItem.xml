@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- One movie / episode card in a row: artwork, title, 4K badge, gold name when there's no artwork. -->
+<component name="PosterItem" extends="Group">
+  <interface>
+    <field id="itemContent" type="node" onChange="onContent" />
+  </interface>
+  <script type="text/brightscript" uri="pkg:/components/PosterItem.brs" />
+  <children>
+    <Rectangle id="frame" width="400" height="225" color="0x1C1A14FF" />
+    <Label id="fallback" width="370" height="225" translation="[15,0]" horizAlign="center" vertAlign="center" wrap="true" maxLines="3" color="0xFFD978FF" font="font:MediumBoldSystemFont" />
+    <Poster id="art" width="400" height="225" loadDisplayMode="scaleToZoom" />
+    <Rectangle id="shade" width="400" height="56" translation="[0,169]" color="0x000000C0" />
+    <Label id="title" width="380" height="56" translation="[12,169]" vertAlign="center" color="0xFFFFFFFF" font="font:SmallBoldSystemFont" />
+    <Rectangle id="badgeBg" width="52" height="30" translation="[338,10]" color="0xE6B34AFF" visible="false" />
+    <Label id="badge" width="52" height="30" translation="[338,10]" horizAlign="center" vertAlign="center" color="0x111111FF" font="font:SmallestBoldSystemFont" text="4K" visible="false" />
+  </children>
+</component>

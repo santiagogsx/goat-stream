@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Goat Stream for Roku: link screen, library rows, full-screen player. Created by Santiago. -->
+<component name="MainScene" extends="Scene">
+  <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
+  <children>
+    <Rectangle id="bg" width="1920" height="1080" color="0x070707FF" />
+    <Poster id="logo" uri="pkg:/images/wordmark.png" width="300" height="85" translation="[80,36]" />
+    <Label id="credit" translation="[1500,62]" width="340" horizAlign="right" color="0x8A7A55FF" font="font:SmallestSystemFont" text="Created by Santiago" />
+
+    <!-- linking / messages -->
+    <Label id="status" translation="[80,190]" width="1760" wrap="true" color="0xFFD978FF" font="font:LargeBoldSystemFont" />
+    <Label id="hint" translation="[80,300]" width="1500" wrap="true" color="0xCCCCCCFF" font="font:MediumSystemFont" />
+    <LabelList id="menu" translation="[80,480]" itemSize="[900,80]" visible="false" color="0xFFFFFFFF" focusedColor="0x111111FF" />
+
+    <!-- library -->
+    <RowList id="rows" translation="[80,170]" itemComponentName="PosterItem" numRows="3"
+             itemSize="[1760,300]" rowItemSize="[[400,225]]" rowItemSpacing="[[28,0]]" itemSpacing="[0,40]"
+             showRowLabel="[true]" rowLabelOffset="[[0,14]]" rowLabelColor="0xFFD978FF" rowLabelFont="font:MediumBoldSystemFont"
+             rowFocusAnimationStyle="floatingFocus" visible="false" />
+    <Label id="detail" translation="[80,1000]" width="1760" color="0xAAAAAAFF" font="font:SmallSystemFont" />
+
+    <Video id="video" width="1920" height="1080" visible="false" enableUI="true" />
+  </children>
+</component>

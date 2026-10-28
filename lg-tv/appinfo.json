@@ -1,0 +1,17 @@
+{
+  "id": "com.goatstream.tv",
+  "version": "1.0.1",
+  "vendor": "Santiago",
+  "type": "web",
+  "main": "index.html",
+  "title": "Goat Stream",
+  "appDescription": "Your movies from your PC, Google Drive, OneDrive and Dropbox. Created by Santiago.",
+  "icon": "icon.png",
+  "largeIcon": "largeIcon.png",
+  "splashBackground": "splash.png",
+  "bgColor": "#000000",
+  "iconColor": "#000000",
+  "resolution": "1920x1080",
+  "disableBackHistoryAPI": true,
+  "handlesRelaunch": false
+}

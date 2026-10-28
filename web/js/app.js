@@ -7,9 +7,26 @@
 
 const TV = !!window.GoatTV;
 const DESKTOP = !!window.goatDesktop;
-const MODE = TV ? 'tv' : DESKTOP ? 'desktop' : 'browser';
+// LG webOS: a tiny stand-in for LG's webOSTV.js (system calls + leaving the app) so we don't need to ship it
+if (!window.webOS && window.PalmServiceBridge) {
+  window.webOS = {
+    service: {
+      request(uri, o) {
+        const b = new window.PalmServiceBridge();
+        b.onservicecallback = msg => { let r = {}; try { r = JSON.parse(msg); } catch (e) { /* bad reply */ } (r.returnValue === false ? o.onFailure : o.onSuccess || (() => {}))(r); };
+        b.call(uri.replace(/\/$/, '') + '/' + o.method, JSON.stringify(o.parameters || {}));
+      },
+    },
+    platformBack() { if (window.PalmSystem && window.PalmSystem.platformBack) window.PalmSystem.platformBack(); else window.close(); },
+  };
+}
+// Samsung (Tizen) and LG (webOS) TV apps: this same UI installed on the TV, talking to the PC over the network
+const TVWEB = !TV && !DESKTOP && ((location.protocol !== 'http:' && location.protocol !== 'https:'
+  && (!!window.tizen || !!window.webOS || /Tizen|Web0S|webOS/i.test(navigator.userAgent))) || window.__goatForceTvWeb === true);
+const APP_TV = TV || TVWEB;              // an installed TV app that remembers which PC it's linked to
+const MODE = TV ? 'tv' : DESKTOP ? 'desktop' : TVWEB ? 'tvweb' : 'browser';
 const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
-if (TV) document.documentElement.classList.add('tv');
+if (APP_TV) document.documentElement.classList.add('tv');
 if (MODE === 'browser' && !matchMedia('(hover: hover)').matches) document.documentElement.classList.add('remote');
 
 // ---------- helpers ----------
@@ -111,10 +128,10 @@ const cloud = window.GoatCloud.create(http);
 
 // Where the PC server is. Desktop + browser: same origin. TV app: remembered address.
 const conn = {
-  base: TV ? store.get('server', '') : '',
+  base: APP_TV ? store.get('server', '') : '',
   token: MODE === 'desktop' || (MODE === 'browser' && IS_LOCALHOST) ? '' : store.get('token', ''),
 };
-function needsPairing() { return MODE === 'tv' ? !(conn.base && conn.token) : (MODE === 'browser' && !IS_LOCALHOST && !conn.token); }
+function needsPairing() { return APP_TV ? !(conn.base && conn.token) : (MODE === 'browser' && !IS_LOCALHOST && !conn.token); }
 
 async function api(path, method, data) {
   const headers = { 'Content-Type': 'application/json' };
@@ -703,6 +720,8 @@ const Player = {
   pickMode(it) {
     const pr = it.probe;
     if (!pr || !pr.vcodec) return 'direct';
+    // Samsung / LG TV apps use the TV's own player: HEVC, HDR, MKV and Dolby audio play as-is (DTS / TrueHD vary by model)
+    if (TVWEB) return ['dts', 'truehd'].includes(pr.acodec) ? 'remux' : 'direct';
     const ext = (it.name.split('.').pop() || '').toLowerCase();
     const mse = t => { try { return !!(window.MediaSource && MediaSource.isTypeSupported(t)); } catch (e) { return false; } };
     const v = document.createElement('video');
@@ -851,8 +870,11 @@ const Player = {
     };
     el.addEventListener('mousemove', wake);
     P.keys = e => {
-      const k = e.key;
+      const k = keyName(e);
       if (k === ' ' || k === 'Enter' || k === 'k' || k === 'MediaPlayPause') togglePlay();
+      else if (k === 'MediaPlay') video.play().catch(() => {});
+      else if (k === 'MediaPause') video.pause();
+      else if (k === 'MediaStop') Player.close();
       else if (k === 'ArrowLeft' || k === 'j' || k === 'MediaRewind') P.seekTo(curTime() - 10);
       else if (k === 'ArrowRight' || k === 'l' || k === 'MediaFastForward') P.seekTo(curTime() + 10);
       else if (k === 'ArrowUp') { video.volume = Math.min(1, video.volume + 0.1); store.set('vol', video.volume); }
@@ -900,7 +922,7 @@ const REACTIONS = ['😂', '😮', '🔥', '❤️', '👏', '🐐'];
 const Together = {
   peer: null, id: '', guests: new Map(), P: null, captured: null, panel: null, open: false,
   max: Math.min(8, Math.max(1, +store.get('wtMax', 4) || 4)),     // how many friends may join
-  available() { return !TV && !!window.Peer && !!watchPage() && !!(HTMLMediaElement.prototype.captureStream); },
+  available() { return !APP_TV && !!window.Peer && !!watchPage() && !!(HTMLMediaElement.prototype.captureStream); },
   link() { return this.id ? `${watchPage()}#${this.id}` : ''; },
   toggle() { if (!this.peer) this.start(); this.open = !this.open; this.renderPanel(); },
   start() {
@@ -1126,7 +1148,7 @@ function openJoinTogether() {
   ov.querySelector('#wt-code').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
 }
 function openWatchViewer(id) {
-  const name = TV ? window.GoatTV.deviceName() : (S.serverName || '');
+  const name = TV ? window.GoatTV.deviceName() : TVWEB ? guessDeviceName() : (S.serverName || '');
   const el = document.createElement('div');
   el.className = 'wt-viewer';
   el.innerHTML = `<iframe src="watch.html?embedded=1&name=${encodeURIComponent(name)}#${encodeURIComponent(id)}" allow="autoplay; fullscreen" title="Watch Together"></iframe>`;
@@ -1138,6 +1160,29 @@ function openWatchViewer(id) {
 window.addEventListener('message', e => {
   if (e.data && e.data.goatWatch === 'close') { const top = overlays[overlays.length - 1]; if (top && top.classList.contains('wt-viewer-wrap')) closeOverlay(top); }
 });
+
+// ---------- Samsung / LG remotes ----------
+// Their remotes send numeric key codes; turn them into the same names the rest of the app uses.
+const TV_KEYS = { 10009: 'GoBack', 461: 'GoBack', 415: 'MediaPlay', 19: 'MediaPause', 10252: 'MediaPlayPause', 417: 'MediaFastForward', 412: 'MediaRewind', 413: 'MediaStop' };
+const keyName = e => TV_KEYS[e.keyCode] || e.key;
+function tvwebExit() {
+  try { if (window.tizen) tizen.application.getCurrentApplication().exit(); else if (window.webOS) webOS.platformBack(); } catch (e) { /* stay */ }
+}
+// Known app IDs for the big streaming services on each platform; anything else: open it from the TV's home screen
+const TVWEB_APPS = {
+  tizen: { 'com.netflix.ninja': '3201907018807', 'com.google.android.youtube.tv': '111299001912', 'com.amazon.amazonvideo.livingroom': '3201910019365', 'com.disney.disneyplus': '3201901017640' },
+  webos: { 'com.netflix.ninja': 'netflix', 'com.google.android.youtube.tv': 'youtube.leanback.v4', 'com.amazon.amazonvideo.livingroom': 'amazon', 'com.disney.disneyplus': 'com.disney.disneyplus-prod' },
+};
+function tvwebLaunch(pkg, name) {
+  const fail = () => toast(`Open ${name} from your TV's home screen.`);
+  try {
+    if (window.tizen && TVWEB_APPS.tizen[pkg]) return tizen.application.launch(TVWEB_APPS.tizen[pkg], () => {}, fail);
+    if (window.webOS && TVWEB_APPS.webos[pkg]) {
+      return webOS.service.request('luna://com.webos.applicationManager', { method: 'launch', parameters: { id: TVWEB_APPS.webos[pkg] }, onFailure: fail });
+    }
+  } catch (e) { /* not available */ }
+  fail();
+}
 
 // ---------- spatial navigation (TV remotes, keyboards) ----------
 const Nav = {
@@ -1204,7 +1249,9 @@ const Nav = {
 
 document.addEventListener('keydown', e => {
   if (Player.active) { Player.active.keys(e); return; }
-  const k = e.key;
+  const k = keyName(e);
+  // Samsung / LG Back on the home screen leaves the app
+  if (TVWEB && k === 'GoBack') { e.preventDefault(); if (!window.goatBack()) tvwebExit(); return; }
   const dirs = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
   const inInput = e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT';
   if (dirs[k]) {
@@ -1246,6 +1293,7 @@ const actions = {
   refresh: () => loadLibrary(),
   launchApp: el => {
     if (TV) { if (!window.GoatTV.launchApp(el.dataset.pkg)) toast('Opening the Play Store…'); }
+    else if (TVWEB) tvwebLaunch(el.dataset.pkg, el.textContent.trim());
     else if (DESKTOP) window.goatDesktop.openExternal(el.dataset.pcurl || el.dataset.url);
     else window.open(el.dataset.url, '_blank');
   },
@@ -1367,7 +1415,7 @@ function remoteSettingsHTML() {
   const accs = TV ? store.get('accounts', []) : (S.cloudAccounts || []);
   return `<div class="sec"><h2>🖥️ Your PC</h2>
       <div class="li"><div class="provider pc">PC</div><div class="grow"><b>${esc(S.serverName || 'Goat Stream PC')}</b>
-        <small>${S.online ? '<span class="ok">Connected</span>' : '<span class="warn">Offline</span>'} ${TV ? '· ' + esc(conn.base) : ''}</small></div></div>
+        <small>${S.online ? '<span class="ok">Connected</span>' : '<span class="warn">Offline</span>'} ${APP_TV ? '· ' + esc(conn.base) : ''}</small></div></div>
       <div class="btns" style="margin-top:1rem"><button class="btn btn-play btn-small focusable" data-act="refresh">Refresh library</button>
       <button class="btn btn-dark btn-small focusable" data-act="unlink">Unlink this ${TV ? 'TV' : 'device'}</button></div></div>
     <div class="sec"><h2>☁️ Cloud drives</h2>
@@ -1542,7 +1590,7 @@ async function tvCloudScan() {
 function unlink(expired) {
   conn.token = '';
   store.set('token', '');
-  if (TV) { conn.base = ''; store.set('server', ''); }
+  if (APP_TV) { conn.base = ''; store.set('server', ''); }
   if (expired) toast('This device was unlinked from your PC. Link it again to keep watching.');
   onboarding();
 }
@@ -1558,7 +1606,7 @@ function onboarding() {
     <h1>Welcome to Goat Stream</h1>
     <div id="ob-step"></div></div>`;
   document.body.appendChild(el);
-  if (TV) obSearch(); else obPair(location.origin);
+  if (APP_TV) obSearch(); else obPair(location.origin);
 }
 function obStep(html) {
   const box = $('#ob-step');
@@ -1602,7 +1650,49 @@ function obSearch() {
       <button class="btn btn-dark focusable" data-ob="manual">Enter PC address</button></div>
       ${list.length ? '' : pcDownloadHTML()}`);
   };
-  window.GoatTV.discover();
+  if (TV) window.GoatTV.discover();
+  else webDiscover().then(list => window.goatDiscovered(JSON.stringify(list)));
+}
+
+// Samsung / LG apps can't broadcast like the Android app, so they ask every address on the home network
+// "are you Goat Stream?" (/api/info) — about 250 quick requests, a few seconds.
+async function tvLocalIp() {
+  try {
+    if (window.tizen && tizen.systeminfo) {
+      for (const prop of ['ETHERNET_NETWORK', 'WIFI_NETWORK']) {
+        const ip = await new Promise(res => { try { tizen.systeminfo.getPropertyValue(prop, n => res(n && n.ipAddress), () => res('')); } catch (e) { res(''); } });
+        if (ip && ip !== '0.0.0.0') return ip;
+      }
+    }
+    if (window.webOS && webOS.service) {
+      const st = await new Promise(res => webOS.service.request('luna://com.palm.connectionmanager', { method: 'getStatus', onSuccess: res, onFailure: () => res({}) }));
+      const ip = (st.wired && st.wired.ipAddress) || (st.wifi && st.wifi.ipAddress);
+      if (ip) return ip;
+    }
+  } catch (e) { /* fall through */ }
+  return '';
+}
+async function webDiscover() {
+  const ip = await tvLocalIp();
+  const remembered = store.get('lastServerIp', '');
+  const prefixes = [...new Set([ip, remembered, '192.168.1.1', '192.168.0.1'].filter(Boolean).map(a => a.split('.').slice(0, 3).join('.')))];
+  const found = [];
+  const probe = async host => {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 1800);
+    try {
+      const r = await fetch(`http://${host}:8787/api/info`, { signal: ctl.signal });
+      const j = await r.json();
+      if (j && j.app === 'goatstream' && !found.some(f => f.host === host)) found.push({ host, port: 8787, name: j.name });
+    } catch (e) { /* not here */ }
+    clearTimeout(t);
+  };
+  for (const pre of prefixes) {
+    const hosts = Array.from({ length: 254 }, (_, i) => `${pre}.${i + 1}`);
+    for (let i = 0; i < hosts.length; i += 48) await Promise.all(hosts.slice(i, i + 48).map(probe));
+    if (found.length) break;
+  }
+  return found;
 }
 async function obPair(base, name) {
   obStep(`<p>Connecting to <b>${esc(name || 'your PC')}</b>…</p><div class="spinner" style="margin:2rem auto"></div>`);
@@ -1613,7 +1703,7 @@ async function obPair(base, name) {
   try { req = JSON.parse(r.text); } catch (e) { /* bad reply */ }
   if (!req || !req.requestId) {
     obStep(`<p class="warn">Couldn't connect to ${esc(base)}.</p><div class="btns" style="justify-content:center">
-      ${TV ? '<button class="btn btn-play focusable" data-ob="retry">Search again</button><button class="btn btn-dark focusable" data-ob="manual">Enter PC address</button>' : '<button class="btn btn-play focusable" data-ob="again">Try again</button>'}</div>`);
+      ${APP_TV ? '<button class="btn btn-play focusable" data-ob="retry">Search again</button><button class="btn btn-dark focusable" data-ob="manual">Enter PC address</button>' :'<button class="btn btn-play focusable" data-ob="again">Try again</button>'}</div>`);
     return;
   }
   obStep(`<p style="font-size:1.3rem">On your PC, click <span class="code">Allow</span><br>to let <b>${esc(deviceName)}</b> watch your movies.</p>
@@ -1627,7 +1717,7 @@ async function obPair(base, name) {
     if (st.state === 'approved') {
       conn.token = st.token;
       store.set('token', st.token);
-      if (TV) { conn.base = base; store.set('server', base); }
+      if (APP_TV) { conn.base = base; store.set('server', base); store.set('lastServerIp', base.replace(/^https?:\/\//, '').replace(/:\d+$/, '')); }
       $('.onboard').remove();
       toast('Linked! Enjoy your movies 🐐');
       S.page = 'home';
@@ -1656,7 +1746,7 @@ document.addEventListener('click', e => {
   const a = b.dataset.ob;
   if (a === 'retry') { obSearch.retried = true; obSearch(); }
   else if (a === 'pick') obPair(b.dataset.url, b.dataset.name);
-  else if (a === 'again') obPair(b.dataset.url || (TV ? conn.base : location.origin));
+  else if (a === 'again') obPair(b.dataset.url || (APP_TV ? conn.base : location.origin));
   else if (a === 'manual') {
     obStep(`<p>Type the address shown in Goat Stream on your PC (Settings → TVs & devices), like <span class="code">192.168.1.20</span></p>
       <div class="field"><input class="input focusable" id="ob-addr" data-autofocus placeholder="192.168.1.20" inputmode="decimal"><button class="btn btn-play focusable" data-ob="go">Connect</button></div>`);
@@ -1723,7 +1813,7 @@ async function tvCheckUpdate(manual) {
       if (!st) return;
       if (pct === -1 && msg === 'allow') st.innerHTML = 'Turn on <b>Allow from this source</b> for Goat Stream, press Back, then choose <b>Update now</b> again.';
       else if (pct === -1) st.innerHTML = `<span class="warn">Update failed: ${esc(msg)}</span>`;
-      else if (pct >= 100) st.textContent = 'Opening the installer — choose Install.';
+      else if (pct >= 100) st.innerHTML = 'Opening the installer — choose <b>Install</b>.<br><small style="color:#999">If it says “App not installed”, uninstall Goat Stream once and reinstall it from ' + esc(GH_REPO ? `${GH_REPO.split('/')[0]}.github.io/${GH_REPO.split('/')[1]}/tv` : 'the download page') + '.</small>';
       else st.textContent = `Downloading… ${pct}%`;
     };
     window.GoatTV.installUpdate(apk.browser_download_url);
@@ -1889,6 +1979,10 @@ function introToggleHTML() {
 // ---------- boot ----------
 async function boot() {
   playIntro();
+  // Samsung: ask for the remote's play/pause/fast-forward buttons (Back and arrows come by default)
+  if (window.tizen && tizen.tvinputdevice) {
+    try { tizen.tvinputdevice.registerKeyBatch(['MediaPlayPause', 'MediaPlay', 'MediaPause', 'MediaFastForward', 'MediaRewind', 'MediaStop']); } catch (e) { /* older TVs */ }
+  }
   if (TV) {
     try { S.installedApps = JSON.parse(window.GoatTV.installedApps(JSON.stringify(STREAMING_APPS.map(a => a.pkg).filter(Boolean)))); } catch (e) { S.installedApps = null; }
   }
