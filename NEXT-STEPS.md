@@ -24,7 +24,8 @@ discovery or block 8787 in any simulator. No git here; GitHub = santiagogsx/goat
   PC covers via `https://pc.goatstream.example/…`). Build = `.github/workflows/xbox.yml` (windows-2022): run by hand
   for a test build (files under the run's Artifacts); `release.yml` calls it with `release: true`.
 - Tested in a browser simulation (mocked bridge + PC): pairing, library, controller, B de-dupe, player hand-off,
-  resume point, error→remux. Compiles only on GitHub (no Visual Studio here). Not yet seen on a real Xbox:
+  resume point, error→remux. **Builds green on GitHub** (run 40685310432, 0 warnings; fixes: no DefaultBackgroundColor
+  on UWP WebView2, tile PNGs must be ≤200 KB). No Visual Studio here. Not yet seen on a real Xbox:
   UDP discovery, the covers route, HDR/24 Hz, MKV/HEVC/Dolby.
 
 ## Waiting on Santiago
