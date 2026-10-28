@@ -10,7 +10,7 @@
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   IgnorableNamespaces="uap mp rescap">
 
-  <Identity Name="Santiago.GoatStream" Publisher="CN=Santiago" Version="1.0.4.0" />
+  <Identity Name="Santiago.GoatStream" Publisher="CN=Santiago" Version="1.0.5.0" />
 
   <mp:PhoneIdentity PhoneProductId="6b1f8a52-4c3e-4f7a-9d0e-2a7c5e1b9f40" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 

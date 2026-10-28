@@ -12,12 +12,12 @@ window.GOAT_CONFIG = {
   oauthRelay: 'https://santiagogsx.github.io/goat-stream/relay/oauth.html',
 
   // Goat Stream's own app registrations with Google / Microsoft / Dropbox (made once by the app's creator —
-  // users never see these). Public IDs only — never secrets. The release build fills them in from the GitHub
-  // secret GOAT_CONFIG_JSON. Google also needs the sign-in helper (cloud-helper/), which keeps Google's secret.
+  // users never see these). Public IDs only — never secrets. (A GOAT_CONFIG_JSON GitHub secret, if set, overrides
+  // them at release.) Google also needs the sign-in helper (cloud-helper/), which keeps Google's secret.
   cloud: {
-    googleClientId: '',
+    googleClientId: '659541422508-ej8c9be3l9feg7s40p4u8lhnros8md8a.apps.googleusercontent.com',
     onedriveClientId: '',
-    dropboxAppKey: '',
-    tokenHelper: '',
+    dropboxAppKey: 'qzna177cgfusctb',
+    tokenHelper: 'https://goat-stream-signin.rs-studio-tt.workers.dev',
   },
 };
