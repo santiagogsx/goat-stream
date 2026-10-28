@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- GitHub version only (merged into src/main/AndroidManifest.xml): in-app updates.
+     Google Play and Amazon don't allow an app to install its own updates, so the "store" version leaves this out. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- lets Goat Stream open the installer for a newer version of itself -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <application>
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_paths" />
+        </provider>
+    </application>
+</manifest>

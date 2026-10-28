@@ -2182,8 +2182,11 @@ const newer = (a, b) => {                       // is version a newer than b?
 };
 
 // Android TV: look for a newer APK in the GitHub releases (twice a day at most, or when asked)
+// Google Play / Amazon version of the Android TV app: the store updates it (stores don't allow self-updates)
+const STORE_TV = TV && !XBOX && typeof window.GoatTV.updatesFromStore === 'function' && !!window.GoatTV.updatesFromStore();
 async function tvCheckUpdate(manual) {
   if (XBOX) { if (manual) toast('The Microsoft Store keeps Goat Stream up to date on your Xbox.'); return; }
+  if (STORE_TV) { if (manual) toast('The app store keeps Goat Stream up to date on this TV.'); return; }
   if (!TV || !GH_REPO) { if (manual) toast('Updates aren\'t set up for this TV app yet.'); return; }
   if (!manual && Date.now() - store.get('updChecked', 0) < 12 * 3600e3) return;
   store.set('updChecked', Date.now());
@@ -2246,9 +2249,9 @@ function updatesHTML(version) {
         ${S.update && S.update.state === 'ready' ? '<button class="btn btn-play btn-small focusable" data-act="installUpdate">Restart & update</button>' : ''}</div>
       <p style="color:#999;font-size:.85rem">New versions download in the background and install when Goat Stream restarts.</p></div>`;
   }
-  if (XBOX) {
+  if (XBOX || STORE_TV) {
     return `<div class="sec"><h2>⬆️ Updates</h2>
-      <div class="li"><div class="grow"><b>Goat Stream ${esc(window.GoatTV.appVersion())}</b><small>The Microsoft Store updates Goat Stream on your Xbox automatically.</small></div></div></div>`;
+      <div class="li"><div class="grow"><b>Goat Stream ${esc(window.GoatTV.appVersion())}</b><small>${XBOX ? 'The Microsoft Store updates Goat Stream on your Xbox automatically.' : 'The app store updates Goat Stream on this TV automatically.'}</small></div></div></div>`;
   }
   if (TV) {
     return `<div class="sec"><h2>⬆️ Updates</h2>

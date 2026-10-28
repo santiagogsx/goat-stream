@@ -32,6 +32,22 @@ android {
         }
     }
 
+    // Two versions of the same app:
+    //  - github: downloaded from GitHub Releases, updates itself ("Update now")
+    //  - store:  Google Play / Amazon Appstore, which don't allow self-updates (the store updates it)
+    flavorDimensions += "dist"
+    productFlavors {
+        create("github") {
+            dimension = "dist"
+            buildConfigField("boolean", "SELF_UPDATE", "true")
+        }
+        create("store") {
+            dimension = "dist"
+            buildConfigField("boolean", "SELF_UPDATE", "false")
+        }
+    }
+    buildFeatures { buildConfig = true }
+
     buildTypes {
         release {
             isMinifyEnabled = false

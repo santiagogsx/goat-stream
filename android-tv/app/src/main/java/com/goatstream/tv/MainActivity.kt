@@ -139,12 +139,17 @@ class MainActivity : ComponentActivity() {
             packageManager.getPackageInfo(packageName, 0).versionName ?: "0"
         } catch (e: Exception) { "0" }
 
+        /** true in the Google Play / Amazon version: the store updates the app, so the UI doesn't look for updates. */
+        @JavascriptInterface
+        fun updatesFromStore(): Boolean = !BuildConfig.SELF_UPDATE
+
         /**
-         * Downloads a newer Goat Stream APK and opens Android's installer.
+         * Downloads a newer Goat Stream APK and opens Android's installer (GitHub version only).
          * Progress: window.goatUpdateProgress(percent) — -1 with a message on failure, 100 when the installer opens.
          */
         @JavascriptInterface
         fun installUpdate(url: String) {
+            if (!BuildConfig.SELF_UPDATE) return
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
                 // one-time: allow Goat Stream to install its own updates
                 main.post {
