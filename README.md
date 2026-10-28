@@ -3,7 +3,8 @@
 
 **Goat Stream is a personal media server and streaming platform** — your own Netflix for the movies and shows you already have.
 
-- 🖥️ **Media server** — your Windows PC becomes the server and streams your **local** movie folders in up to 4K/HDR.
+- ✅ **No PC required** — on Xbox and TVs, choose **No PC needed** for cloud movies and watch parties, or link a PC if your movies are on it.
+- 🖥️ **Optional media server** — your Windows PC becomes the server and streams your **local** movie folders in up to 4K/HDR.
 - ☁️ **Cloud movie streaming** — play straight from **Google Drive**, **OneDrive** and **Dropbox**, no downloading first.
 - 🍿 **Watch parties** — **Watch Together** lets friends watch the same movie at the same time, in sync.
 - 📺 **Every screen** — Windows, **Xbox**, **Android TV / Fire TV**, Samsung, LG, Roku, and any TV or phone with a web browser.
