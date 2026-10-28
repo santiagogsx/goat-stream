@@ -129,6 +129,32 @@ Wrong cover? Open the movie → **Fix match** → search → pick the right one 
 - **Easiest:** copy the APK to a USB stick → plug into the TV → open it with a file manager (e.g. *File Commander*), allow "install unknown apps".
 - **Or** with the TV's *Developer options → USB/Network debugging* on: `adb connect <tv-ip>` then `adb install app-debug.apk`.
 
+### Put it on Google Play and the Amazon Appstore (so anyone can install it)
+Every release also contains a **store version** of the TV app. It's the same app without the built-in "Update now" downloader, because the stores update it themselves and don't allow self-updates:
+- **`GoatStream-TV-GooglePlay.aab`** → Google Play (Android TV, Google TV)
+- **`GoatStream-TV-Amazon.apk`** → Amazon Appstore (Fire TV)
+
+Between releases you can make them yourself: GitHub → **Actions → Android TV build → Run workflow** → download **GoatStream-TV** under *Artifacts*.
+
+> Someone who installed the GitHub version must uninstall it once before installing from a store (the stores sign the app with their own key).
+
+**Google Play** ($25 one time)
+1. Make a developer account at <https://play.google.com/console> (*Personal*). Google checks your ID.
+2. **Create app** → name *Goat Stream* → *App* → *Free*.
+3. **Testing rule for new personal accounts:** first run a **closed test** with **at least 12 people for 14 days in a row**. *Testing → Closed testing* → create a track → upload `GoatStream-TV-GooglePlay.aab` → add your testers' Gmail addresses → share the opt-in link. They install from the Play Store and use it now and then.
+4. Meanwhile fill in **App content** (*Policy → App content*):
+   - Privacy policy link: Goat Stream collects nothing.
+   - **Data safety:** no data collected or shared. Sign-ins go straight to Google/Microsoft/Dropbox.
+   - Ads: no. Target age: 13+ (users pick their own movies).
+   - Content rating questionnaire (category: *Entertainment / streaming of user's own media*).
+5. **Advanced settings → Form factors → add Android TV**, with a TV banner (1280×720, from `xbox/store-art/hero-1920x1080.png` scaled down) and a TV screenshot. Google reviews TV apps separately for remote control use.
+6. **App signing:** let Google manage the app-signing key. The key in your GitHub secrets becomes the "upload key".
+7. After the 14 days: *Apply for production* → answer Google's short questions → **Production → Create release** → upload the same `.aab` → roll out.
+
+**Amazon Appstore / Fire TV** (free, no tester rule)
+1. Make a free account at <https://developer.amazon.com> → **Apps & Services → Add new app → Android**.
+2. Upload `GoatStream-TV-Amazon.apk`, choose **Fire TV** devices, fill in the listing (same pictures and texts), content rating and privacy link → **Submit**. Amazon usually reviews within a few days.
+
 ### First launch
 The TV app **finds your PC by itself**. A pop-up appears on the PC → click **Allow**. That's it — the TV also receives your Google Drive / Dropbox access, so **cloud movies play straight from the cloud even when the PC is off**.
 

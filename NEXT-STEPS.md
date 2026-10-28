@@ -28,6 +28,13 @@ discovery or block 8787 in any simulator. No git here; GitHub = santiagogsx/goat
   on UWP WebView2, tile PNGs must be ≤200 KB). No Visual Studio here. Not yet seen on a real Xbox:
   UDP discovery, the covers route, HDR/24 Hz, MKV/HEVC/Dolby.
 
+## Google Play / Amazon (2026-10-28) — on GitHub main, not in a release yet
+- Android TV app now has flavors `github` (self-updater, REQUEST_INSTALL_PACKAGES + FileProvider in src/github) and
+  `store` (no self-update; `GoatTV.updatesFromStore()` → app.js `STORE_TV` hides update checks). Build =
+  `.github/workflows/android-tv.yml` (manual or called by release.yml): GoatStream-TV.apk, -GooglePlay.aab, -Amazon.apk.
+  Test run 40720366057 green; manifests checked. targetSdk 35 is fine (Play needs ≥34 for TV apps).
+- Owner: Play Console account ($25) + 12 testers × 14 days closed test; Amazon developer account (free). README §3.
+
 ## Waiting on Santiago
 - Xbox: free individual Partner Center account → Dev Mode test → reserve "Goat Stream" → GitHub *variables*
   `XBOX_IDENTITY_NAME`, `XBOX_PUBLISHER`, `XBOX_PUBLISHER_NAME` → submit (README "🎮 Xbox app"). Needs a privacy-policy page.
